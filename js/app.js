@@ -101,6 +101,9 @@ var App = (() => {
       document.getElementById('compress-result').innerHTML = '';
     });
 
+    // Pack as .tar.lz4
+    document.getElementById('btn-pack-tar').addEventListener('click', packAsTarLz4);
+
     // Action change: show/hide test button and level selector
     document.getElementById('file-action').addEventListener('change', (e) => {
       const isDecompress = e.target.value === 'decompress';
@@ -227,11 +230,55 @@ var App = (() => {
 
     if (allSuccess && results.length > 0) {
       html += `<button class="btn btn-primary" onclick="App.downloadAll()">${I18n.t('result.downloadAll')}</button>`;
+
+      // Detect tar format in decompressed data
+      if (action === 'decompress') {
+        for (const r of results) {
+          if (r.data && r.data.length > 263) {
+            // Check for "ustar" magic at offset 257
+            const magic = String.fromCharCode(r.data[257], r.data[258], r.data[259], r.data[260], r.data[261]);
+            if (magic === 'ustar') {
+              html += ` <button class="btn btn-primary" onclick="App.extractTar()">${I18n.t('compress.extractTar')}</button>`;
+              break;
+            }
+          }
+        }
+      }
     }
     html += '</div>';
     resultDiv.innerHTML = html;
 
     window._lastResults = results.filter(r => !r.error);
+  }
+
+  function extractTar() {
+    if (!window._lastResults || window._lastResults.length === 0) return;
+    const resultDiv = document.getElementById('compress-result');
+
+    try {
+      for (const r of window._lastResults) {
+        if (!r.data) continue;
+        const entries = TarUtil.unpack(r.data);
+        // Download each file
+        for (const entry of entries) {
+          if (entry.data && entry.data.length > 0) {
+            const filename = entry.name.split('/').pop() || entry.name;
+            LZ4Compress.downloadFile(entry.data, filename);
+          }
+        }
+        // Show summary
+        const dirs = entries.filter(e => e.type === '5').length;
+        const files = entries.filter(e => e.type === '0').length;
+        const totalSize = entries.reduce((s, e) => s + (e.data ? e.data.length : 0), 0);
+        resultDiv.innerHTML += `
+          <div class="result-card success" style="margin-top:0.5rem;">
+            <h3>${I18n.t('compress.extractDone')}</h3>
+            <p>${files} ${I18n.t('result.files')}, ${dirs} directories, ${formatBytes(totalSize)} ${I18n.t('result.total')}</p>
+          </div>`;
+      }
+    } catch (e) {
+      resultDiv.innerHTML += `<div class="result-card error">${e.message}</div>`;
+    }
   }
 
   function downloadAll() {
@@ -272,6 +319,52 @@ var App = (() => {
       reader.onerror = () => reject(reader.error);
       reader.readAsArrayBuffer(file);
     });
+  }
+
+  async function packAsTarLz4() {
+    if (selectedFiles.length === 0) { alert(I18n.t('compress.noFile')); return; }
+    const resultDiv = document.getElementById('compress-result');
+    resultDiv.innerHTML = `<div class="loading">${I18n.t('result.processing')}</div>`;
+
+    try {
+      // Read all files and build tar entries with relative paths
+      const entries = [];
+      for (const file of selectedFiles) {
+        const data = await readFileAsUint8(file);
+        // Use webkitRelativePath if available, otherwise just filename
+        const name = file.webkitRelativePath || file.name;
+        entries.push({ name, data });
+      }
+
+      // Pack into tar
+      const tarData = TarUtil.pack(entries);
+
+      // LZ4 compress the tar
+      const startTime = performance.now();
+      const options = getCompressOptions();
+      const lz4Data = LZ4Frame.compress(tarData, options);
+      const elapsed = performance.now() - startTime;
+
+      // Determine output filename (use folder name if available)
+      const folderName = selectedFiles[0]?.webkitRelativePath?.split('/')[0] || 'archive';
+      const outName = folderName + '.tar.lz4';
+
+      resultDiv.innerHTML = `
+        <div class="result-card success">
+          <h3>${I18n.t('compress.packDone')}</h3>
+          <div class="stats-grid">
+            <div class="stat"><label>${I18n.t('result.original')}</label><span>${formatBytes(tarData.length)}</span></div>
+            <div class="stat"><label>${I18n.t('result.compressed')}</label><span>${formatBytes(lz4Data.length)}</span></div>
+            <div class="stat"><label>${I18n.t('result.ratio')}</label><span>${(tarData.length / lz4Data.length).toFixed(2)}:1</span></div>
+            <div class="stat"><label>${I18n.t('result.files')}</label><span>${entries.length}</span></div>
+            <div class="stat"><label>${I18n.t('result.time')}</label><span>${elapsed.toFixed(1)} ms</span></div>
+          </div>
+          <button class="btn btn-primary" onclick="App.downloadResult()">${I18n.t('result.download')} ${outName}</button>
+        </div>`;
+      window._lastResult = { data: lz4Data, filename: outName };
+    } catch (e) {
+      resultDiv.innerHTML = `<div class="result-card error"><h3>${I18n.t('result.error')}</h3><p>${e.message}</p></div>`;
+    }
   }
 
   function getCompressOptions() {
@@ -547,7 +640,7 @@ var App = (() => {
     return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
   }
 
-  return { init, downloadResult, downloadAll };
+  return { init, downloadResult, downloadAll, extractTar };
 })();
 
 document.addEventListener('DOMContentLoaded', App.init);

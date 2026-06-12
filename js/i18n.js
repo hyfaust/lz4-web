@@ -6,7 +6,7 @@ var I18n = (() => {
 
   const dict = {
     // ========== Header ==========
-    'header.title': { en: 'LZ4 Toolkit', zh: 'LZ4 工具箱' },
+    'header.title': { en: 'web', zh: 'web' },
     'header.subtitle': { en: 'Compress, Decompress, Parse & Benchmark — Pure Browser Implementation', zh: '压缩、解压、解析与基准测试 — 纯浏览器实现' },
 
     // ========== Tab Navigation ==========
@@ -38,6 +38,10 @@ var I18n = (() => {
     'compress.test': { en: '🔍 Integrity Test', zh: '🔍 完整性测试' },
     'compress.noFile': { en: 'Please select file(s) first', zh: '请先选择文件' },
     'compress.selectFolder': { en: '📁 Select Folder', zh: '📁 选择文件夹' },
+    'compress.packTar': { en: '📦 Pack as .tar.lz4', zh: '📦 打包为 .tar.lz4' },
+    'compress.packDone': { en: 'Pack Complete', zh: '打包完成' },
+    'compress.extractTar': { en: '📂 Extract Files', zh: '📂 解包文件' },
+    'compress.extractDone': { en: 'Extraction Complete', zh: '解包完成' },
     'compress.clear': { en: '✕ Clear', zh: '✕ 清除' },
     'compress.dropText': { en: 'Drop file here or click to select', zh: '拖拽文件到此处或点击选择' },
     'compress.dropHint': { en: 'Supports any file for compression, .lz4 for decompression', zh: '支持任意文件压缩，.lz4 文件解压' },
@@ -281,7 +285,7 @@ var I18n = (() => {
     'doc.bestPractices': { en: 'Best Practices', zh: '最佳实践' },
 
     // ========== Footer ==========
-    'footer.line1': { en: 'LZ4 Toolkit — Pure browser implementation of <a href="https://lz4.org" target="_blank">LZ4</a> compression algorithm v1.10.0', zh: 'LZ4 工具箱 — <a href="https://lz4.org" target="_blank">LZ4</a> 压缩算法 v1.10.0 的纯浏览器实现' },
+    'footer.line1': { en: 'lz4-web — Pure browser implementation of <a href="https://lz4.org" target="_blank">LZ4</a> compression algorithm v1.10.0', zh: 'lz4-web — <a href="https://lz4.org" target="_blank">LZ4</a> 压缩算法 v1.10.0 的纯浏览器实现' },
     'footer.line2': { en: 'Based on <a href="https://github.com/lz4/lz4" target="_blank">github.com/lz4/lz4</a> specification & source code', zh: '基于 <a href="https://github.com/lz4/lz4" target="_blank">github.com/lz4/lz4</a> 规范与源码' },
 
     // ========== Language toggle ==========

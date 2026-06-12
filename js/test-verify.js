@@ -20,13 +20,14 @@ const ctx = vm.createContext({
 });
 
 function loadModule(file) { vm.runInContext(fs.readFileSync(path.join(siteDir, file), 'utf8'), ctx); }
-loadModule('xxhash.js'); loadModule('lz4-block.js'); loadModule('lz4hc.js'); loadModule('lz4-frame.js'); loadModule('lz4-parser.js');
+loadModule('xxhash.js'); loadModule('lz4-block.js'); loadModule('lz4hc.js'); loadModule('lz4-frame.js'); loadModule('lz4-parser.js'); loadModule('tar.js');
 
 const { xxh32 } = ctx.XXHash;
 const { compress: blockCompress, decompress: blockDecompress, compressBound } = ctx.LZ4Block;
 const LZ4HC = ctx.LZ4HC;
 const { compress: frameCompress, decompress: frameDecompress } = ctx.LZ4Frame;
 const { parse: frameParse } = ctx.LZ4Parser;
+const TarUtil = ctx.TarUtil;
 
 let passed = 0, failed = 0;
 function assert(cond, msg) {
@@ -518,7 +519,140 @@ const largeParsed = ctx.LZ4Parser.parse(largeSkip);
 assert(largeParsed.frames[0].info.frameSize === 65536, 'Large frame size field correct');
 
 // ============================================================
-console.log('\n=== 17. CLI cross-verification ===');
+console.log('\n=== 17. Tar pack/unpack ===');
+
+// Pack files into tar
+const tarEntries = [
+  { name: 'dir1/file1.txt', data: new TextEncoder().encode('Hello from file 1\n') },
+  { name: 'dir1/file2.txt', data: new TextEncoder().encode('Hello from file 2\n') },
+  { name: 'dir2/subdir/file3.txt', data: new TextEncoder().encode('Nested file 3\n') },
+  { name: 'root.txt', data: new TextEncoder().encode('Root level file\n') },
+];
+
+const tarArchive = TarUtil.pack(tarEntries);
+assert(tarArchive.length > 0, `Tar archive created: ${tarArchive.length} bytes`);
+
+// Verify tar magic (ustar at offset 257 of first entry)
+const tarMagic = String.fromCharCode(tarArchive[257], tarArchive[258], tarArchive[259], tarArchive[260], tarArchive[261]);
+assert(tarMagic === 'ustar', `Tar magic = "${tarMagic}" (expected "ustar")`);
+
+// Unpack and verify
+const unpacked = TarUtil.unpack(tarArchive);
+assert(unpacked.length >= 4, `Unpacked ${unpacked.length} entries (expected >= 4)`);
+
+// Verify file contents
+for (const entry of tarEntries) {
+  const found = unpacked.find(e => e.name === entry.name);
+  assert(found !== undefined, `Found entry: ${entry.name}`);
+  if (found && found.data) {
+    const match = found.data.length === entry.data.length &&
+      entry.data.every((v, i) => v === found.data[i]);
+    assert(match, `Content matches: ${entry.name} (${found.data.length}B)`);
+  }
+}
+
+// Verify directory entries exist
+const dirEntries = unpacked.filter(e => e.type === '5');
+assert(dirEntries.length >= 3, `Directory entries: ${dirEntries.length} (expected >= 3)`);
+
+// Tar + LZ4 roundtrip
+const tarLz4 = ctx.LZ4Frame.compress(tarArchive, { contentChecksum: true, contentSize: true });
+const tarLz4Dec = ctx.LZ4Frame.decompress(tarLz4);
+assert(tarLz4Dec.data.length === tarArchive.length, `tar.lz4 roundtrip: ${tarArchive.length}B → ${tarLz4.length}B → ${tarLz4Dec.data.length}B`);
+
+// Re-unpack from decompressed data
+const repacked = TarUtil.unpack(tarLz4Dec.data);
+for (const entry of tarEntries) {
+  const found = repacked.find(e => e.name === entry.name);
+  assert(found !== undefined && found.data, `Roundtrip entry: ${entry.name}`);
+  if (found && found.data) {
+    const match = found.data.length === entry.data.length &&
+      entry.data.every((v, i) => v === found.data[i]);
+    assert(match, `Roundtrip content: ${entry.name}`);
+  }
+}
+
+// CLI cross-verify: JS tar.lz4 → CLI decompress → tar extract
+try {
+  const fTarLz4 = path.join(siteDir, '_tar_test.tar.lz4');
+  const fTar = path.join(siteDir, '_tar_test.tar');
+  fs.writeFileSync(fTarLz4, tarLz4);
+
+  // Decompress lz4
+  execSync(`lz4 -d -f "${fTarLz4}" "${fTar}"`);
+  const cliTar = new Uint8Array(fs.readFileSync(fTar));
+  assert(cliTar.length === tarArchive.length, `CLI decompressed tar: ${cliTar.length}B === ${tarArchive.length}B`);
+
+  // Extract tar with CLI
+  const extractDir = path.join(siteDir, '_tar_extract');
+  try { fs.mkdirSync(extractDir, { recursive: true }); } catch {}
+  execSync(`tar xf "${fTar}" -C "${extractDir}"`);
+
+  // Verify extracted files
+  for (const entry of tarEntries) {
+    const filePath = path.join(extractDir, entry.name);
+    const exists = fs.existsSync(filePath);
+    assert(exists, `CLI extracted: ${entry.name}`);
+    if (exists) {
+      const content = fs.readFileSync(filePath);
+      const contentArr = new Uint8Array(content);
+      const match = contentArr.length === entry.data.length &&
+        entry.data.every((v, i) => v === contentArr[i]);
+      assert(match, `CLI content matches: ${entry.name}`);
+    }
+  }
+
+  // Cleanup
+  try { fs.rmSync(extractDir, { recursive: true }); } catch {}
+  try { fs.unlinkSync(fTarLz4); } catch {}
+  try { fs.unlinkSync(fTar); } catch {}
+} catch (e) {
+  console.log('  Tar CLI test error:', e.message.substring(0, 120));
+  failed++;
+}
+
+// CLI tar → JS decompress
+try {
+  // Create files for CLI to tar
+  const cliTarDir = path.join(siteDir, '_tar_cli_dir');
+  try { fs.mkdirSync(path.join(cliTarDir, 'sub'), { recursive: true }); } catch {}
+  fs.writeFileSync(path.join(cliTarDir, 'a.txt'), 'file A');
+  fs.writeFileSync(path.join(cliTarDir, 'sub', 'b.txt'), 'file B');
+
+  const fCliTar = path.join(siteDir, '_cli_tar.tar');
+  const fCliTarLz4 = path.join(siteDir, '_cli_tar.tar.lz4');
+
+  // CLI: tar + lz4
+  execSync(`tar cf "${fCliTar}" -C "${cliTarDir}" .`);
+  execSync(`lz4 -f "${fCliTar}" "${fCliTarLz4}"`);
+
+  // JS: decompress + unpack
+  const cliLz4Data = new Uint8Array(fs.readFileSync(fCliTarLz4));
+  const cliDecResult = ctx.LZ4Frame.decompress(cliLz4Data);
+  const cliEntries = TarUtil.unpack(cliDecResult.data);
+
+  const cliFileA = cliEntries.find(e => e.name.endsWith('a.txt'));
+  const cliFileB = cliEntries.find(e => e.name.endsWith('b.txt'));
+  assert(cliFileA && cliFileA.data, 'CLI tar: found a.txt');
+  assert(cliFileB && cliFileB.data, 'CLI tar: found b.txt');
+  if (cliFileA) {
+    assert(new TextDecoder().decode(cliFileA.data) === 'file A', 'CLI tar: a.txt content');
+  }
+  if (cliFileB) {
+    assert(new TextDecoder().decode(cliFileB.data) === 'file B', 'CLI tar: b.txt content');
+  }
+
+  // Cleanup
+  try { fs.rmSync(cliTarDir, { recursive: true }); } catch {}
+  try { fs.unlinkSync(fCliTar); } catch {}
+  try { fs.unlinkSync(fCliTarLz4); } catch {}
+} catch (e) {
+  console.log('  CLI→JS tar test error:', e.message.substring(0, 120));
+  failed++;
+}
+
+// ============================================================
+console.log('\n=== 18. CLI cross-verification ===');
 const tmpDir = siteDir;
 try {
   const cliData = new TextEncoder().encode('CLI cross-verification test data. '.repeat(10));

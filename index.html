@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LZ4 Toolkit</title>
+  <title>lz4-web</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
 </head>
@@ -12,7 +12,7 @@
 <header class="header">
   <div class="header-top">
     <div class="header-left"></div>
-    <h1>⚡ <span>LZ4</span> <span data-i18n="header.title">Toolkit</span></h1>
+    <h1>⚡ <span>lz4</span>-<span data-i18n="header.title">web</span></h1>
     <div class="header-actions">
       <button id="lang-toggle" class="lang-btn" title="切换到英文">EN</button>
       <a href="https://github.com/lz4/lz4" target="_blank" rel="noopener" class="github-link" data-i18n-title="github.tooltip" title="在 GitHub 上查看">
@@ -134,6 +134,7 @@
         <div style="margin-top:0.8rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
           <button class="btn btn-primary" id="btn-process" data-i18n="compress.process">▶ 开始处理</button>
           <button class="btn btn-sm" id="btn-select-folder" data-i18n="compress.selectFolder">📁 选择文件夹</button>
+          <button class="btn btn-sm" id="btn-pack-tar" data-i18n="compress.packTar">📦 打包为 .tar.lz4</button>
           <button class="btn btn-sm" id="btn-test" style="display:none" data-i18n="compress.test">🔍 完整性测试</button>
           <button class="btn btn-sm" id="btn-clear" data-i18n="compress.clear">✕ 清除</button>
         </div>
@@ -509,6 +510,7 @@ lz4 -b1 -e12 file.txt      # Benchmark levels 1-12</pre>
 <script src="js/lz4-bench.js"></script>
 <script src="js/lz4-stream.js"></script>
 <script src="js/lz4-parallel.js"></script>
+<script src="js/tar.js"></script>
 <script src="js/app.js"></script>
 
 </body>
