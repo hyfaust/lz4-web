@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LZ4 Toolkit</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
+</head>
+<body>
+
+<header class="header">
+  <div class="header-top">
+    <div class="header-left"></div>
+    <h1>⚡ <span>LZ4</span> <span data-i18n="header.title">Toolkit</span></h1>
+    <div class="header-actions">
+      <button id="lang-toggle" class="lang-btn" title="切换到英文">EN</button>
+      <a href="https://github.com/lz4/lz4" target="_blank" rel="noopener" class="github-link" data-i18n-title="github.tooltip" title="在 GitHub 上查看">
+        <svg class="github-icon" viewBox="0 0 16 16" width="28" height="28" fill="currentColor">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<nav class="tab-nav">
+  <button class="tab-btn active" data-tab="compress" data-i18n="tab.compress">🔧 压缩 / 解压</button>
+  <button class="tab-btn" data-tab="parser" data-i18n="tab.parser">🔍 帧格式解析</button>
+  <button class="tab-btn" data-tab="docs" data-i18n="tab.docs">📖 文档</button>
+  <button class="tab-btn" data-tab="bench" data-i18n="tab.bench">📊 基准测试</button>
+</nav>
+
+<main class="main-content">
+
+  <!-- ==================== Compress Tab ==================== -->
+  <div id="tab-compress" class="tab-panel active">
+    <div class="card">
+      <h2 data-i18n="compress.title">LZ4 压缩 / 解压工具</h2>
+
+      <div class="mode-toggle">
+        <button class="mode-btn active" data-mode="file" data-i18n="compress.fileMode">📁 文件模式</button>
+        <button class="mode-btn" data-mode="text" data-i18n="compress.textMode">📝 文本模式</button>
+      </div>
+      <input type="hidden" id="compress-mode" value="file">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label data-i18n="compress.action">操作</label>
+          <select id="file-action">
+            <option value="compress" data-i18n="compress.action.compress">压缩 (.lz4)</option>
+            <option value="decompress" data-i18n="compress.action.decompress">解压</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label data-i18n="compress.blockSize">块大小</label>
+          <select id="opt-block-size">
+            <option value="4">64 KB</option>
+            <option value="5">256 KB</option>
+            <option value="6">1 MB</option>
+            <option value="7" selected>4 MB</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label data-i18n="compress.blockMode">块模式</label>
+          <select id="opt-block-mode">
+            <option value="0" data-i18n="compress.blockMode.linked">链接模式</option>
+            <option value="1" selected data-i18n="compress.blockMode.independent">独立模式</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <div style="display:flex;gap:1rem;">
+            <div class="checkbox-group">
+              <input type="checkbox" id="opt-content-crc" checked>
+              <label for="opt-content-crc" data-i18n="compress.contentCRC">内容校验</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="opt-block-crc">
+              <label for="opt-block-crc" data-i18n="compress.blockCRC">块校验</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- File Mode -->
+      <div id="file-section">
+        <div class="drop-zone" id="drop-zone">
+          <div class="icon">📂</div>
+          <p data-i18n="compress.dropText">拖拽文件到此处或点击选择</p>
+          <p style="font-size:0.75rem;margin-top:0.3rem;color:var(--text-dim);" data-i18n="compress.dropHint">支持任意文件压缩，.lz4 文件解压</p>
+        </div>
+        <input type="file" id="file-input" style="display:none">
+        <div id="compress-result"></div>
+      </div>
+
+      <!-- Text Mode -->
+      <div id="text-section" style="display:none">
+        <div class="form-group" style="margin-bottom:1rem;">
+          <label data-i18n="compress.inputText">输入文本</label>
+          <textarea id="text-input" rows="5" data-i18n-placeholder="compress.inputPlaceholder" placeholder="输入要压缩的文本..."></textarea>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+          <button class="btn btn-primary" id="btn-text-compress" data-i18n="compress.btnCompress">压缩 →</button>
+          <button class="btn btn-primary" id="btn-text-decompress" data-i18n="compress.btnDecompress">← 解压</button>
+        </div>
+        <div class="form-group">
+          <label data-i18n="compress.outputHex">压缩输出 (十六进制)</label>
+          <textarea id="text-output" rows="3" readonly data-i18n-placeholder="compress.outputPlaceholder" placeholder="压缩数据将显示在此..."></textarea>
+        </div>
+        <div id="text-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Parser Tab ==================== -->
+  <div id="tab-parser" class="tab-panel">
+    <div class="card">
+      <h2 data-i18n="parser.title">LZ4 帧格式解析器</h2>
+      <p style="color:var(--text-dim);margin-bottom:1rem;" data-i18n="parser.desc">上传 .lz4 文件，可视化其内部帧结构 — 魔数、标志位、数据块、校验和等。</p>
+
+      <div class="drop-zone" id="parser-drop-zone">
+        <div class="icon">🔬</div>
+        <p data-i18n="parser.dropText">拖拽 .lz4 文件到此处或点击分析</p>
+      </div>
+      <input type="file" id="parser-file-input" style="display:none" accept=".lz4,.lz4">
+
+      <div id="parser-output" style="margin-top:1.5rem;"></div>
+    </div>
+  </div>
+
+  <!-- ==================== Documentation Tab ==================== -->
+  <div id="tab-docs" class="tab-panel">
+    <!-- LZ4 Overview -->
+    <details class="doc-section" open>
+      <summary data-i18n="doc.overview">LZ4 概述</summary>
+      <div class="doc-content">
+        <h3 data-i18n="doc.whatIs">什么是 LZ4？</h3>
+        <p data-i18n="doc.whatIsP">LZ4 是由 <strong>Yann Collet</strong> 设计的无损压缩算法，专注于压缩和解压的<strong>极致速度</strong>。它属于 LZ77 算法家族。</p>
+
+        <h3 data-i18n="doc.keyChars">核心特性</h3>
+        <ul>
+          <li data-i18n="doc.compSpeed"><strong>压缩速度：</strong>&gt;500 MB/s 每核（默认级别）</li>
+          <li data-i18n="doc.decompSpeed"><strong>解压速度：</strong>数 GB/s 每核（接近内存带宽极限）</li>
+          <li data-i18n="doc.compRatio"><strong>压缩比：</strong>约 2.1:1（取决于数据类型）</li>
+          <li data-i18n="doc.memUsage"><strong>内存占用：</strong>压缩 16KB（可配置），解压极低</li>
+          <li data-i18n="doc.threadSafe"><strong>线程安全：</strong>是，支持多线程压缩 (v1.10.0+)</li>
+        </ul>
+
+        <h3 data-i18n="doc.comparison">与其他算法对比</h3>
+        <table class="doc-table">
+          <thead><tr><th data-i18n="doc.algorithm">算法</th><th data-i18n="doc.compSpdCol">压缩速度</th><th data-i18n="doc.decompSpdCol">解压速度</th><th data-i18n="doc.ratioCol">压缩比</th><th data-i18n="doc.useCase">适用场景</th></tr></thead>
+          <tbody>
+            <tr><td>LZ4</td><td>Very Fast</td><td>Very Fast</td><td>Medium</td><td>Speed-critical, real-time</td></tr>
+            <tr><td>LZ4 HC</td><td>Slow</td><td>Very Fast</td><td>Better</td><td>Compress once, decompress many</td></tr>
+            <tr><td>zstd</td><td>Fast</td><td>Fast</td><td>High</td><td>General purpose</td></tr>
+            <tr><td>gzip</td><td>Medium</td><td>Medium</td><td>Good</td><td>Compatibility</td></tr>
+            <tr><td>Snappy</td><td>Very Fast</td><td>Very Fast</td><td>Low</td><td>Similar to LZ4</td></tr>
+          </tbody>
+        </table>
+
+        <h3 data-i18n="doc.howItWorks">工作原理</h3>
+        <p data-i18n="doc.howItWorksP">LZ4 使用基于哈希的方法在已处理数据中查找匹配序列：</p>
+        <ol>
+          <li data-i18n="doc.howStep1">维护 64 KB 的滑动窗口用于匹配搜索</li>
+          <li data-i18n="doc.howStep2">4 字节哈希表实现 O(1) 匹配查找</li>
+          <li data-i18n="doc.howStep3">每个序列由以下组成：<code>token + literal_length + literals + offset + match_length</code></li>
+          <li data-i18n="doc.howStep4">不使用熵编码 — 解压纯靠内存拷贝</li>
+        </ol>
+      </div>
+    </details>
+
+    <!-- Frame Format -->
+    <details class="doc-section">
+      <summary data-i18n="doc.frameSpec">LZ4 帧格式规范</summary>
+      <div class="doc-content">
+        <h3 data-i18n="doc.frameStructure">帧结构</h3>
+        <p data-i18n="doc.frameDesc">LZ4 帧格式是 <code>lz4</code> CLI 使用的标准自描述格式。它用元数据包裹压缩块以实现互操作性。</p>
+
+        <div class="frame-diagram">
+          <div class="frame-block magic">Magic<br>4B</div>
+          <div class="frame-block flg">FLG<br>1B</div>
+          <div class="frame-block bd">BD<br>1B</div>
+          <div class="frame-block size">Content Size<br>0-8B</div>
+          <div class="frame-block dict">Dict ID<br>0-4B</div>
+          <div class="frame-block hcrc">HCRC<br>1B</div>
+          <div class="frame-block block">Block 1</div>
+          <div class="frame-block block">Block 2</div>
+          <div class="frame-block block">...</div>
+          <div class="frame-block endmark">EndMark<br>4B</div>
+          <div class="frame-block ccrc">Content CRC<br>0-4B</div>
+        </div>
+
+        <div class="frame-legend">
+          <div class="legend-item"><div class="legend-color" style="background:#e91e63"></div><span data-i18n="doc.magicNumber">魔数</span></div>
+          <div class="legend-item"><div class="legend-color" style="background:#9c27b0"></div><span data-i18n="doc.flags">标志位</span></div>
+          <div class="legend-item"><div class="legend-color" style="background:#673ab7"></div><span data-i18n="doc.blockDesc">块描述符</span></div>
+          <div class="legend-item"><div class="legend-color" style="background:#3f51b5"></div><span data-i18n="doc.contentSize">内容大小</span></div>
+          <div class="legend-item"><div class="legend-color" style="background:#2196f3"></div><span data-i18n="doc.dictId">字典 ID</span></div>
+          <div class="legend-item"><div class="legend-color" style="background:#03a9f4"></div><span data-i18n="doc.headerCRC">头部校验</span></div>
+          <div class="legend-item"><div class="legend-color" style="background:#4caf50"></div><span data-i18n="doc.dataBlocks">数据块</span></div>
+          <div class="legend-item"><div class="legend-color" style="background:#ff5722"></div><span data-i18n="doc.endMark">结束标记</span></div>
+          <div class="legend-item"><div class="legend-color" style="background:#ff9800"></div><span data-i18n="doc.contentCRC">内容校验</span></div>
+        </div>
+
+        <h3 data-i18n="doc.magicNumber">魔数</h3>
+        <p data-i18n="doc.magicDesc"><code>0x184D2204</code>（4 字节，小端序）。标识有效的 LZ4 帧。可跳过帧使用 <code>0x184D2A50-0x184D2A5F</code>。</p>
+
+        <h3 data-i18n="doc.flgByte">FLG 字节（标志位）</h3>
+        <table class="doc-table">
+          <thead><tr><th data-i18n="doc.bit">位</th><th data-i18n="doc.field">字段</th><th data-i18n="doc.description">说明</th></tr></thead>
+          <tbody>
+            <tr><td>7-6</td><td data-i18n="doc.flgVersion">版本号</td><td data-i18n="doc.flgVersionDesc">必须为 <code>01</code></td></tr>
+            <tr><td>5</td><td data-i18n="doc.flgBlockIndep">块独立性</td><td data-i18n="doc.flgBlockIndepDesc">1 = 独立块，0 = 链接块</td></tr>
+            <tr><td>4</td><td data-i18n="doc.flgBlockCRC">块校验和</td><td data-i18n="doc.flgBlockCRCDesc">1 = 每个块附带 xxh32 校验和</td></tr>
+            <tr><td>3</td><td data-i18n="doc.flgContentSize">内容大小</td><td data-i18n="doc.flgContentSizeDesc">1 = 包含 8 字节内容大小字段</td></tr>
+            <tr><td>2</td><td data-i18n="doc.flgContentCRC">内容校验和</td><td data-i18n="doc.flgContentCRCDesc">1 = 整个内容的 xxh32 校验和</td></tr>
+            <tr><td>1</td><td data-i18n="doc.flgReserved">保留</td><td data-i18n="doc.flgReservedDesc">必须为 0</td></tr>
+            <tr><td>0</td><td data-i18n="doc.flgDictID">字典 ID</td><td data-i18n="doc.flgDictIDDesc">1 = 包含 4 字节字典 ID 字段</td></tr>
+          </tbody>
+        </table>
+
+        <h3 data-i18n="doc.bdByte">BD 字节（块描述符）</h3>
+        <table class="doc-table">
+          <thead><tr><th data-i18n="doc.bdBits">位 4-6</th><th data-i18n="doc.bdMaxSize">最大块大小</th></tr></thead>
+          <tbody>
+            <tr><td>4</td><td>64 KB</td></tr>
+            <tr><td>5</td><td>256 KB</td></tr>
+            <tr><td>6</td><td>1 MB</td></tr>
+            <tr><td>7</td><td>4 MB</td></tr>
+          </tbody>
+        </table>
+
+        <h3 data-i18n="doc.dataBlocks">数据块</h3>
+        <p data-i18n="doc.dataBlocksDesc">每个块有 4 字节大小头（小端序）。如果最高位（<code>0x80000000</code>）被设置，则块以未压缩方式存储。其余 31 位为数据大小。</p>
+
+        <h3 data-i18n="doc.headerChecksum">头部校验和</h3>
+        <p data-i18n="doc.headerChecksumDesc">一个字节：<code>(xxh32(描述符) >> 8) & 0xFF</code>。覆盖从 FLG 到可选字段的所有描述符字节。</p>
+
+        <h3 data-i18n="doc.endMark">结束标记</h3>
+        <p data-i18n="doc.endMarkDesc"><code>0x00000000</code> — 标记块序列结束。</p>
+      </div>
+    </details>
+
+    <!-- Block Format -->
+    <details class="doc-section">
+      <summary data-i18n="doc.blockSpec">LZ4 块格式规范</summary>
+      <div class="doc-content">
+        <h3 data-i18n="doc.blockStructure">块结构</h3>
+        <p data-i18n="doc.blockStructDesc">LZ4 压缩块由多个<strong>序列</strong>组成。每个序列包含一个 token、可选的字面量长度字节、字面量、2 字节偏移量和可选的匹配长度字节。</p>
+
+        <pre>Sequence = Token + [Extra Literal Length] + Literals + Offset(2B) + [Extra Match Length]</pre>
+
+        <h3 data-i18n="doc.tokenByte">Token 字节</h3>
+        <p data-i18n="doc.tokenDesc">一个字节分为两个 4 位字段：</p>
+        <ul>
+          <li data-i18n="doc.tokenHigh"><strong>高 4 位：</strong>字面量长度 (0-15)。如果为 15，读取额外字节（每个 0-255，累加直到 &lt;255）</li>
+          <li data-i18n="doc.tokenLow"><strong>低 4 位：</strong>匹配长度减去 MIN_MATCH(4)。值 0 表示 4 字节，15 表示 19+ 字节（需读取额外字节）</li>
+        </ul>
+
+        <h3 data-i18n="doc.offset">偏移量</h3>
+        <p data-i18n="doc.offsetDesc">2 字节，小端序。表示从多远的位置开始拷贝。值 0 <strong>无效</strong>。最大值：65535。</p>
+
+        <h3 data-i18n="doc.encodingExamples">编码示例</h3>
+        <table class="doc-table">
+          <thead><tr><th data-i18n="doc.scenario">场景</th><th data-i18n="doc.token">Token</th><th data-i18n="doc.extraBytes">额外字节</th><th data-i18n="doc.result">结果</th></tr></thead>
+          <tbody>
+            <tr><td data-i18n="doc.ex1Scenario">3 个字面量，匹配=5</td><td><code>0x31</code></td><td data-i18n="doc.exNone">无</td><td data-i18n="doc.ex1Result">3 字节字面量，从偏移位置拷贝 5 字节</td></tr>
+            <tr><td data-i18n="doc.ex2Scenario">20 个字面量，匹配=4</td><td><code>0xF0</code></td><td><code>0x05</code></td><td data-i18n="doc.ex2Result">15+5=20 字节字面量，拷贝 4</td></tr>
+            <tr><td data-i18n="doc.ex3Scenario">0 个字面量，匹配=100</td><td><code>0x5F</code></td><td><code>0x51</code></td><td data-i18n="doc.ex3Result">0 字面量，4+15+81=100 字节拷贝</td></tr>
+          </tbody>
+        </table>
+
+        <h3 data-i18n="doc.endOfBlock">块结束规则</h3>
+        <ul>
+          <li data-i18n="doc.eobRule1">最后一个序列<strong>仅包含字面量</strong>（无偏移量）</li>
+          <li data-i18n="doc.eobRule2">输入的最后 5 字节<strong>始终为字面量</strong></li>
+          <li data-i18n="doc.eobRule3">最后一个匹配必须在块结束前至少 12 字节开始</li>
+          <li data-i18n="doc.eobRule4">&lt; 12 字节的块无法压缩</li>
+        </ul>
+
+        <h3 data-i18n="doc.overlapCopy">重叠拷贝（类 RLE）</h3>
+        <p data-i18n="doc.overlapDesc">当 <code>matchLength &gt; offset</code> 时，匹配延伸到当前写入位置之后。通过逐字节拷贝处理，有效地重复字节。偏移量为 1、matchLength=100 时，最后一个字节重复 100 次。</p>
+      </div>
+    </details>
+
+    <!-- Compression Levels -->
+    <details class="doc-section">
+      <summary data-i18n="doc.compLevels">压缩级别指南</summary>
+      <div class="doc-content">
+        <h3 data-i18n="doc.fastMode">快速模式 (级别 1-2)</h3>
+        <p data-i18n="doc.fastModeDesc">使用标准 LZ4 算法和哈希表。<strong>加速因子</strong>控制速度/压缩比权衡 — 值越大跳过更多位置，速度更快但压缩比更低。</p>
+
+        <h3 data-i18n="doc.hcMode">HC 模式 (级别 3-12)</h3>
+        <p data-i18n="doc.hcModeDesc">高压缩模式使用更多 CPU 来查找更好的匹配。HC 模式使用基于链的搜索而非简单哈希表。</p>
+
+        <table class="doc-table">
+          <thead><tr><th data-i18n="doc.level">级别</th><th data-i18n="doc.algorithmCol">算法</th><th data-i18n="doc.speed">速度</th><th data-i18n="doc.ratioCol">压缩比</th><th data-i18n="doc.notes">说明</th></tr></thead>
+          <tbody>
+            <tr><td>1 (默认)</td><td>Fast</td><td data-i18n="doc.lvFastest">最快</td><td data-i18n="doc.lvGood">良好</td><td data-i18n="doc.lv1Note">实时场景最佳选择</td></tr>
+            <tr><td>2</td><td>HC</td><td data-i18n="doc.lvMedium">中等</td><td data-i18n="doc.lvBetter">更好</td><td data-i18n="doc.lv2Note">v1.10.0 新增中间级别</td></tr>
+            <tr><td>3-9</td><td>HC</td><td data-i18n="doc.lvSlow">慢</td><td data-i18n="doc.lvBetter">更好</td><td data-i18n="doc.lv3Note">压缩比逐步提升</td></tr>
+            <tr><td>10-12</td><td>HC Optimal</td><td data-i18n="doc.lvSlowest">最慢</td><td data-i18n="doc.lvBest">最佳</td><td data-i18n="doc.lv10Note">最优解析，最高压缩比</td></tr>
+            <tr><td>--fast</td><td>Fast</td><td data-i18n="doc.lvUltra">极快</td><td data-i18n="doc.lvLower">较低</td><td data-i18n="doc.lvFastNote">更高加速因子</td></tr>
+          </tbody>
+        </table>
+
+        <p><strong data-i18n="doc.keyInsight">关键洞察：</strong><span data-i18n="doc.keyInsightText">解压速度与压缩级别<strong>完全相同</strong>。解压器不知道也不关心使用了哪个级别。</span></p>
+
+        <h3 data-i18n="doc.whenToUse">各级别使用场景</h3>
+        <ul>
+          <li data-i18n="doc.useLevel1"><strong>级别 1：</strong>默认 — 良好平衡。用于日志文件、网络传输、实时数据</li>
+          <li data-i18n="doc.useLevel3"><strong>级别 3-9：</strong>压缩一次但解压多次（如游戏资源、软件分发）</li>
+          <li data-i18n="doc.useLevel10"><strong>级别 10-12：</strong>归档存储，压缩时间不重要</li>
+          <li data-i18n="doc.useFast"><strong>--fast：</strong>极端速度场景、嵌入式系统、高吞吐管道</li>
+        </ul>
+      </div>
+    </details>
+
+    <!-- Dictionary Compression -->
+    <details class="doc-section">
+      <summary data-i18n="doc.dictComp">字典压缩</summary>
+      <div class="doc-content">
+        <h3 data-i18n="doc.dictOverview">概述</h3>
+        <p data-i18n="doc.dictOverviewP">字典压缩对<strong>小数据</strong>（KB 级别）非常有效，如 JSON 记录、日志行或短消息。预训练字典为压缩器提供"已知前缀"上下文。</p>
+
+        <h3 data-i18n="doc.dictHowItWorks">工作原理</h3>
+        <ol>
+          <li data-i18n="doc.dictStep1">从数据的代表性样本构建字典</li>
+          <li data-i18n="doc.dictStep2">在处理前将字典加载到压缩流中</li>
+          <li data-i18n="doc.dictStep3">压缩器使用字典内容作为虚拟历史，实现更好的匹配</li>
+          <li data-i18n="doc.dictStep4">解压器必须使用<strong>完全相同的字典</strong></li>
+        </ol>
+
+        <h3 data-i18n="doc.dictIDTitle">字典 ID</h3>
+        <p data-i18n="doc.dictIdDesc">帧格式支持 4 字节字典 ID 字段，帮助解码器选择正确的字典。这是可选的 — 字典也可以通过上下文确定。</p>
+
+        <h3 data-i18n="doc.buildingDicts">构建字典</h3>
+        <p data-i18n="doc.buildingDictsP">推荐：使用 <a href="https://github.com/facebook/zstd" style="color:var(--primary-light)">Zstandard 字典构建器</a> — 它也适用于 LZ4。字典应包含数据样本中的常见模式。</p>
+      </div>
+    </details>
+
+    <!-- CLI Reference -->
+    <details class="doc-section">
+      <summary data-i18n="doc.cliRef">CLI 快速参考</summary>
+      <div class="doc-content">
+        <h3 data-i18n="doc.basicUsage">基本用法</h3>
+        <pre>lz4 file.txt              # Compress → file.txt.lz4
+lz4 -d file.txt.lz4       # Decompress → file.txt
+lz4 -12 file.txt           # Max compression
+lz4 -T4 file.txt           # 4-thread compression
+lz4 -t file.lz4            # Test integrity
+lz4 --list file.lz4        # Show file info
+lz4 -b1 -e12 file.txt      # Benchmark levels 1-12</pre>
+
+        <h3 data-i18n="doc.commonOptions">常用选项</h3>
+        <table class="doc-table">
+          <thead><tr><th data-i18n="doc.option">选项</th><th data-i18n="doc.description">说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>-1</code> ~ <code>-12</code></td><td data-i18n="doc.optLevel">压缩级别</td></tr>
+            <tr><td><code>-d</code></td><td data-i18n="doc.optDecompress">解压</td></tr>
+            <tr><td><code>-f</code></td><td data-i18n="doc.optForce">强制覆盖</td></tr>
+            <tr><td><code>-k</code></td><td data-i18n="doc.optKeep">保留源文件</td></tr>
+            <tr><td><code>--rm</code></td><td data-i18n="doc.optRemove">删除源文件</td></tr>
+            <tr><td><code>-T#</code></td><td data-i18n="doc.optThread">线程数 (0=自动)</td></tr>
+            <tr><td><code>-D FILE</code></td><td data-i18n="doc.optDict">使用字典文件</td></tr>
+            <tr><td><code>-BD</code></td><td data-i18n="doc.optBD">块依赖模式</td></tr>
+            <tr><td><code>-BX</code></td><td data-i18n="doc.optBX">启用块校验和</td></tr>
+            <tr><td><code>--content-size</code></td><td data-i18n="doc.optContentSize">在帧中存储原始大小</td></tr>
+            <tr><td><code>--fast[=#]</code></td><td data-i18n="doc.optFast">超快压缩</td></tr>
+            <tr><td><code>--best</code></td><td data-i18n="doc.optBest">等同于 -12</td></tr>
+          </tbody>
+        </table>
+
+        <h3 data-i18n="doc.envVars">环境变量 (v1.10.0+)</h3>
+        <table class="doc-table">
+          <thead><tr><th data-i18n="doc.variable">变量</th><th data-i18n="doc.description">说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>LZ4_CLEVEL</code></td><td data-i18n="doc.envLevel">默认压缩级别</td></tr>
+            <tr><td><code>LZ4_NBWORKERS</code></td><td data-i18n="doc.envWorkers">默认线程数</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <!-- Use Cases -->
+    <details class="doc-section">
+      <summary data-i18n="doc.useCases">使用场景与最佳实践</summary>
+      <div class="doc-content">
+        <h3 data-i18n="doc.recUseCases">推荐使用场景</h3>
+        <ul>
+          <li data-i18n="doc.ucLog"><strong>日志压缩：</strong>快速压缩，即时解压用于日志分析</li>
+          <li data-i18n="doc.ucDB"><strong>数据库存储：</strong>RocksDB、Cassandra、HBase 使用 LZ4 进行块压缩</li>
+          <li data-i18n="doc.ucNet"><strong>网络传输：</strong>以最小延迟开销减少带宽</li>
+          <li data-i18n="doc.ucGame"><strong>游戏资源：</strong>加载画面期间快速解压</li>
+          <li data-i18n="doc.ucMem"><strong>内存压缩：</strong>Linux zswap/zram 使用 LZ4 进行页面压缩</li>
+          <li data-i18n="doc.ucBackup"><strong>备份归档：</strong>结合 <code>tar</code> 使用：<code>tar cf - dir/ | lz4 > archive.tar.lz4</code></li>
+        </ul>
+
+        <h3 data-i18n="doc.bestPractices">最佳实践</h3>
+        <ol>
+          <li data-i18n="doc.bp1">除非特别需要更高压缩比，否则使用默认级别 (-1)</li>
+          <li data-i18n="doc.bp2">启用 <code>--content-size</code> 以获得更好的工具支持</li>
+          <li data-i18n="doc.bp3">对于小数据（&lt;1KB），考虑使用字典压缩</li>
+          <li data-i18n="doc.bp4">级别 10+ 且关注解压速度时，使用 <code>--favor-decSpeed</code></li>
+          <li data-i18n="doc.bp5">多线程（<code>-T</code>）仅对大文件有效；小文件不值得使用</li>
+        </ol>
+      </div>
+    </details>
+  </div>
+
+  <!-- ==================== Benchmark Tab ==================== -->
+  <div id="tab-bench" class="tab-panel">
+    <div class="card">
+      <h2 data-i18n="bench.title">浏览器内 LZ4 基准测试</h2>
+      <p style="color:var(--text-dim);margin-bottom:1rem;" data-i18n="bench.desc">在浏览器中测试 LZ4 压缩/解压性能，支持生成数据或自定义文件。</p>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label data-i18n="bench.maxSize">最大测试数据大小</label>
+          <select id="bench-size">
+            <option value="65536">64 KB</option>
+            <option value="262144">256 KB</option>
+            <option value="1048576" selected>1 MB</option>
+            <option value="4194304">4 MB</option>
+            <option value="16777216">16 MB</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <div style="display:flex;gap:0.5rem;">
+            <button class="btn btn-primary" id="btn-bench-start" data-i18n="bench.runBtn">▶ 运行基准测试</button>
+            <button class="btn btn-primary" id="btn-bench-file" data-i18n="bench.fileBtn">📁 用文件测试</button>
+          </div>
+        </div>
+      </div>
+      <input type="file" id="bench-file-input" style="display:none">
+
+      <div id="bench-progress" class="progress-bar" style="display:none;">
+        <div class="progress-bar-fill"></div>
+        <span class="progress-label" data-i18n="bench.running">运行中...</span>
+      </div>
+
+      <div id="bench-result"></div>
+    </div>
+  </div>
+
+</main>
+
+<footer class="footer">
+  <p data-i18n="footer.line1">LZ4 工具箱 — <a href="https://lz4.org" target="_blank">LZ4</a> 压缩算法 v1.10.0 的纯浏览器实现</p>
+  <p data-i18n="footer.line2">基于 <a href="https://github.com/lz4/lz4" target="_blank">github.com/lz4/lz4</a> 规范与源码</p>
+</footer>
+
+<!-- JS Modules -->
+<script src="js/i18n.js"></script>
+<script src="js/xxhash.js"></script>
+<script src="js/lz4-block.js"></script>
+<script src="js/lz4-frame.js"></script>
+<script src="js/lz4-parser.js"></script>
+<script src="js/lz4-compress.js"></script>
+<script src="js/lz4-bench.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
