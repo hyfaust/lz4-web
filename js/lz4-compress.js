@@ -75,14 +75,14 @@ var LZ4Compress = (() => {
   /**
    * Handle file upload for decompression.
    */
-  function handleFileDecompress(file) {
+  function handleFileDecompress(file, options = {}) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         try {
           const data = new Uint8Array(reader.result);
           const startTime = performance.now();
-          const result = LZ4Frame.decompress(data);
+          const result = LZ4Frame.decompress(data, options);
           const elapsed = performance.now() - startTime;
           resolve({
             data: result.data,

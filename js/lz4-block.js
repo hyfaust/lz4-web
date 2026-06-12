@@ -54,17 +54,44 @@ var LZ4Block = (() => {
   /**
    * Compress data using LZ4 block format.
    * @param {Uint8Array} src - source data
-   * @param {Object} options - { acceleration: number } (1=best ratio, higher=faster)
+   * @param {Object} options - { acceleration, dict }
+   *   acceleration: number (1=best ratio, higher=faster)
+   *   dict: Uint8Array (dictionary, last 64KB used for matching)
    * @returns {Uint8Array} compressed data
    */
   function compress(src, options = {}) {
     if (src.length === 0) return new Uint8Array(0);
     const acceleration = Math.max(1, options.acceleration || 1);
+    const dict = options.dict || null;
 
     // Output buffer: worst case = src.length + src.length/255 + 16
     const maxDst = src.length + Math.floor(src.length / 255) + 16;
     const dst = new Uint8Array(maxDst);
     const hashTable = new Int32Array(HASH_SIZE).fill(-1);
+    // Separate hash table for dictionary entries to avoid overwriting source entries
+    const dictHashTable = dict ? new Int32Array(HASH_SIZE).fill(-1) : null;
+
+    // Dictionary support: pre-fill hash table with dict content.
+    // Dict positions use negative indices (dictStart = -dictUsedLen).
+    // During matching, we read from dict[] for negative candidates.
+    let dictUsed = null;
+    let dictStart = 0; // logical start position of dict in the stream
+    if (dict && dict.length > 0) {
+      const dictOffset = Math.max(0, dict.length - MAX_DISTANCE);
+      dictUsed = dict.slice(dictOffset);
+      dictStart = -dictUsed.length;
+      // Fill dict hash table (separate from source hash table)
+      for (let i = 0; i + MIN_MATCH <= dictUsed.length; i++) {
+        const v = read32le(dictUsed, i);
+        dictHashTable[hash4(v)] = dictStart + i;
+      }
+    }
+
+    // Helper to read a byte at a logical position (negative = dict, non-negative = src)
+    function readAt(pos) {
+      if (pos >= 0) return src[pos];
+      return dictUsed ? dictUsed[dictUsed.length + pos] : 0;
+    }
 
     let srcOff = 0;
     let dstOff = 0;
@@ -72,25 +99,37 @@ var LZ4Block = (() => {
 
     // Main compression loop
     while (srcOff < src.length) {
-      // Find match
       let bestMatchOff = -1;
       let bestMatchLen = 0;
 
       if (srcOff + MIN_MATCH <= src.length - MIN_MATCH) {
         const v = read32le(src, srcOff);
         const h = hash4(v);
-        const candidate = hashTable[h];
+        const srcCandidate = hashTable[h];
         hashTable[h] = srcOff;
 
-        if (candidate >= 0 && candidate < srcOff && (srcOff - candidate) <= MAX_DISTANCE) {
-          // Verify match (don't extend into last MIN_MATCH bytes - spec requirement)
+        // Check both source and dictionary candidates, pick the best
+        const candidates = [];
+        if (srcCandidate >= 0 && srcCandidate < srcOff && (srcOff - srcCandidate) <= MAX_DISTANCE) {
+          candidates.push(srcCandidate);
+        }
+        if (dictHashTable) {
+          const dictCandidate = dictHashTable[h];
+          if (dictCandidate < 0 && (srcOff - dictCandidate) <= MAX_DISTANCE) {
+            candidates.push(dictCandidate);
+          }
+        }
+
+        for (const candidate of candidates) {
           const maxMatchEnd = src.length - MIN_MATCH;
           let matchLen = 0;
-          while (srcOff + matchLen < maxMatchEnd &&
-                 src[candidate + matchLen] === src[srcOff + matchLen]) {
+          while (srcOff + matchLen < maxMatchEnd) {
+            const cp = candidate + matchLen;
+            const sp = srcOff + matchLen;
+            if (readAt(cp) !== src[sp]) break;
             matchLen++;
           }
-          if (matchLen >= MIN_MATCH) {
+          if (matchLen >= MIN_MATCH && matchLen > bestMatchLen) {
             bestMatchOff = srcOff - candidate;
             bestMatchLen = matchLen;
           }
@@ -98,70 +137,41 @@ var LZ4Block = (() => {
       }
 
       if (bestMatchLen >= MIN_MATCH) {
-        // Write sequence: token + literal length bytes + literals + offset + match length bytes
         const literalLength = srcOff - literalStart;
-
-        // Token
         const tokenLitLen = Math.min(literalLength, 15);
         const tokenMatchLen = Math.min(bestMatchLen - MIN_MATCH, 15);
-        const token = ((tokenLitLen << 4) | tokenMatchLen) & 0xFF;
-        dst[dstOff++] = token;
+        dst[dstOff++] = ((tokenLitLen << 4) | tokenMatchLen) & 0xFF;
 
-        // Literal length extra bytes
-        if (literalLength >= 15) {
-          dstOff = writeVarLength(dst, dstOff, literalLength - 15);
-        }
+        if (literalLength >= 15) dstOff = writeVarLength(dst, dstOff, literalLength - 15);
+        for (let i = 0; i < literalLength; i++) dst[dstOff++] = src[literalStart + i];
 
-        // Literals
-        for (let i = 0; i < literalLength; i++) {
-          dst[dstOff++] = src[literalStart + i];
-        }
-
-        // Offset (little-endian)
         dst[dstOff++] = bestMatchOff & 0xFF;
         dst[dstOff++] = (bestMatchOff >> 8) & 0xFF;
 
-        // Match length extra bytes
-        if (bestMatchLen - MIN_MATCH >= 15) {
-          dstOff = writeVarLength(dst, dstOff, bestMatchLen - MIN_MATCH - 15);
-        }
+        if (bestMatchLen - MIN_MATCH >= 15) dstOff = writeVarLength(dst, dstOff, bestMatchLen - MIN_MATCH - 15);
 
-        // Update positions
         srcOff += bestMatchLen;
         literalStart = srcOff;
 
-        // Also hash intermediate positions for better matches
         if (bestMatchLen > SKIP_TRIGGER) {
-          const advance = bestMatchLen - SKIP_TRIGGER;
-          for (let i = 1; i < advance; i++) {
+          for (let i = 1; i < bestMatchLen - SKIP_TRIGGER; i++) {
             if (srcOff - bestMatchLen + i + MIN_MATCH <= src.length) {
-              const vv = read32le(src, srcOff - bestMatchLen + i);
-              hashTable[hash4(vv)] = srcOff - bestMatchLen + i;
+              hashTable[hash4(read32le(src, srcOff - bestMatchLen + i))] = srcOff - bestMatchLen + i;
             }
           }
         }
       } else {
-        // No match found: skip positions based on acceleration
         srcOff += acceleration;
       }
 
-      // Safety: if output is getting too large, bail
       if (dstOff > maxDst - 18) break;
     }
 
-    // Write last literals (must be at least the last 5 bytes)
+    // Write last literals
     const literalLength = src.length - literalStart;
-    const tokenLitLen = Math.min(literalLength, 15);
-    const token = (tokenLitLen << 4) & 0xF0;
-    dst[dstOff++] = token;
-
-    if (literalLength >= 15) {
-      dstOff = writeVarLength(dst, dstOff, literalLength - 15);
-    }
-
-    for (let i = 0; i < literalLength; i++) {
-      dst[dstOff++] = src[literalStart + i];
-    }
+    dst[dstOff++] = (Math.min(literalLength, 15) << 4) & 0xF0;
+    if (literalLength >= 15) dstOff = writeVarLength(dst, dstOff, literalLength - 15);
+    for (let i = 0; i < literalLength; i++) dst[dstOff++] = src[literalStart + i];
 
     return dst.slice(0, dstOff);
   }
@@ -170,47 +180,47 @@ var LZ4Block = (() => {
    * Decompress LZ4 block format data.
    * @param {Uint8Array} src - compressed data
    * @param {number} uncompressedSize - expected uncompressed size (upper bound)
+   * @param {Object} options - { dict: Uint8Array }
    * @returns {Uint8Array} decompressed data
    */
-  function decompress(src, uncompressedSize) {
-    const dst = new Uint8Array(uncompressedSize);
+  function decompress(src, uncompressedSize, options = {}) {
+    const dict = options.dict || null;
+    // Prepend dict to output buffer so offsets can reference it
+    const dictLen = dict ? Math.min(dict.length, MAX_DISTANCE) : 0;
+    const dictSlice = dict ? dict.slice(dict.length - dictLen) : null;
+    const totalSize = dictLen + uncompressedSize;
+    const dst = new Uint8Array(totalSize);
+    // Copy dict into buffer at the beginning
+    if (dictSlice) dst.set(dictSlice, 0);
+
     let srcOff = 0;
-    let dstOff = 0;
+    let dstOff = dictLen; // start writing after dict
 
     while (srcOff < src.length) {
-      // Read token
       const token = src[srcOff++];
       let literalLength = (token >> 4) & 0x0F;
       let matchLength = token & 0x0F;
 
-      // Read extra literal length bytes
       if (literalLength === 15) {
         const result = readVarLength(src, srcOff);
         literalLength += result.value;
         srcOff = result.bytesRead;
       }
 
-      // Copy literals
       for (let i = 0; i < literalLength; i++) {
-        if (dstOff >= uncompressedSize) return dst;
-        if (srcOff >= src.length) return dst.slice(0, dstOff);
+        if (dstOff >= totalSize) return dst.slice(dictLen, dictLen + uncompressedSize);
+        if (srcOff >= src.length) return dst.slice(dictLen, dstOff);
         dst[dstOff++] = src[srcOff++];
       }
 
-      // Check if we've reached the end of the block
       if (srcOff >= src.length) break;
 
-      // Read offset (2 bytes, little-endian)
       if (srcOff + 2 > src.length) break;
       const offset = src[srcOff] | (src[srcOff + 1] << 8);
       srcOff += 2;
 
-      // Offset 0 is invalid
-      if (offset === 0) {
-        throw new Error('Invalid LZ4 block: offset is 0');
-      }
+      if (offset === 0) throw new Error('Invalid LZ4 block: offset is 0');
 
-      // Read extra match length bytes
       matchLength += MIN_MATCH;
       if ((token & 0x0F) === 15) {
         const result = readVarLength(src, srcOff);
@@ -218,19 +228,18 @@ var LZ4Block = (() => {
         srcOff = result.bytesRead;
       }
 
-      // Copy match (handle overlap for RLE-like patterns)
       let matchPos = dstOff - offset;
       if (matchPos < 0) {
-        throw new Error('Invalid LZ4 block: match position before start of output');
+        throw new Error('Invalid LZ4 block: match position before dictionary start');
       }
 
       for (let i = 0; i < matchLength; i++) {
-        if (dstOff >= uncompressedSize) return dst;
+        if (dstOff >= totalSize) return dst.slice(dictLen, dictLen + uncompressedSize);
         dst[dstOff++] = dst[matchPos++];
       }
     }
 
-    return dst.slice(0, dstOff);
+    return dst.slice(dictLen, dstOff);
   }
 
   /**

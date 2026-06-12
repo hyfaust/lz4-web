@@ -137,7 +137,7 @@ var App = (() => {
           result = await LZ4Compress.handleFileCompress(file, getCompressOptions());
           result.filename = file.name + '.lz4';
         } else {
-          result = await LZ4Compress.handleFileDecompress(file);
+          result = await LZ4Compress.handleFileDecompress(file, { dictData: dictData });
           result.filename = file.name.endsWith('.lz4') ? file.name.slice(0, -4) : file.name + '.dec';
         }
         result.inputName = file.name;

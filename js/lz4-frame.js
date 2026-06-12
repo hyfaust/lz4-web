@@ -70,6 +70,7 @@ var LZ4Frame = (() => {
     // Negative values = explicit acceleration factor (--fast mode)
     const compressionLevel = options.compressionLevel || 1;
     const acceleration = compressionLevel < 0 ? Math.abs(compressionLevel) : Math.max(1, compressionLevel);
+    const dictData = options.dictData || null;
 
     const blockSize = BlockMaxSize[blockSizeID] || BlockMaxSize[4];
 
@@ -137,7 +138,7 @@ var LZ4Frame = (() => {
     while (srcOff < src.length) {
       const chunkSize = Math.min(blockSize, src.length - srcOff);
       const blockData = src.slice(srcOff, srcOff + chunkSize);
-      const compressed = LZ4Block.compress(blockData, { acceleration });
+      const compressed = LZ4Block.compress(blockData, { acceleration, dict: dictData });
 
       let isCompressed = false;
       let blockDataToWrite;
@@ -191,7 +192,8 @@ var LZ4Frame = (() => {
    * @param {Uint8Array} src - LZ4 frame data
    * @returns {Object} { data: Uint8Array, frameInfo: Object }
    */
-  function decompress(src) {
+  function decompress(src, options = {}) {
+    const dictData = options.dictData || null;
     if (src.length < 4) throw new Error('Input too short');
 
     const magic = read32le(src, 0);
@@ -299,7 +301,7 @@ var LZ4Frame = (() => {
         decompressedBlock = blockData;
       } else {
         const maxDecompressSize = frameInfo.blockSize;
-        decompressedBlock = LZ4Block.decompress(blockData, maxDecompressSize);
+        decompressedBlock = LZ4Block.decompress(blockData, maxDecompressSize, { dict: dictData });
       }
 
       outputChunks.push(decompressedBlock);

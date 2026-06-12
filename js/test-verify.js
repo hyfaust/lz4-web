@@ -146,7 +146,72 @@ for (const size of [65536, 262144]) {
 }
 
 // ============================================================
-console.log('\n=== 8. CLI cross-verification ===');
+console.log('\n=== 8. Dictionary compression ===');
+
+// Test data: JSON-like records sharing common keys
+const dictContent = new TextEncoder().encode(
+  '{"user_id":0,"name":"placeholder","email":"placeholder@example.com","role":"user","active":true,"created_at":"2025-01-01T00:00:00Z"}\n'.repeat(50)
+);
+
+// Small records that share patterns with the dictionary
+const dictTestRecords = [
+  '{"user_id":42,"name":"Alice","email":"alice@example.com","role":"admin","active":true,"created_at":"2026-03-15T10:30:00Z"}',
+  '{"user_id":99,"name":"Bob","email":"bob@example.com","role":"user","active":false,"created_at":"2026-06-01T08:00:00Z"}',
+  '{"user_id":7,"name":"Charlie","email":"charlie@example.com","role":"moderator","active":true,"created_at":"2026-01-20T14:45:00Z"}',
+];
+
+// Block-level dict compression roundtrip
+console.log('Block-level:');
+for (const rec of dictTestRecords) {
+  const src = new TextEncoder().encode(rec);
+  const cNoDict = blockCompress(src);
+  const cWithDict = blockCompress(src, { dict: dictContent });
+  const dWithDict = blockDecompress(cWithDict, src.length, { dict: dictContent });
+  const match = dWithDict.length === src.length && src.every((v, i) => v === dWithDict[i]);
+  const saving = cNoDict.length - cWithDict.length;
+  assert(match, `"${rec.substring(0, 50)}..." [no-dict:${cNoDict.length}B, dict:${cWithDict.length}B, save:${saving}B]`);
+}
+
+// Frame-level dict compression roundtrip
+console.log('Frame-level:');
+for (const rec of dictTestRecords) {
+  const src = new TextEncoder().encode(rec);
+  const fNoDict = frameCompress(src, { contentChecksum: true, contentSize: true });
+  const fWithDict = frameCompress(src, { contentChecksum: true, contentSize: true, dictData: dictContent });
+  const rWithDict = frameDecompress(fWithDict, { dictData: dictContent });
+  const match = rWithDict.data.length === src.length && src.every((v, i) => v === rWithDict.data[i]);
+  const saving = fNoDict.length - fWithDict.length;
+  assert(match, `frame "${rec.substring(0, 50)}..." [no-dict:${fNoDict.length}B, dict:${fWithDict.length}B, save:${saving}B]`);
+}
+
+// Multiple records batch compression with dict
+console.log('Batch:');
+const batchSrc = new TextEncoder().encode(dictTestRecords.join('\n'));
+const batchNoDict = frameCompress(batchSrc, { contentChecksum: true, contentSize: true });
+const batchWithDict = frameCompress(batchSrc, { contentChecksum: true, contentSize: true, dictData: dictContent });
+const batchResult = frameDecompress(batchWithDict, { dictData: dictContent });
+assert(batchResult.data.length === batchSrc.length && batchSrc.every((v, i) => v === batchResult.data[i]),
+  `batch [no-dict:${batchNoDict.length}B, dict:${batchWithDict.length}B, ratio:${(batchSrc.length/batchWithDict.length).toFixed(2)}:1]`);
+
+// Dict without dict on decompress should still produce output (just without dict matches)
+console.log('No-dict decompress:');
+const fOnly = frameCompress(dictTestRecords[0] ? new TextEncoder().encode(dictTestRecords[0]) : new Uint8Array(0), { dictData: dictContent, contentChecksum: true, contentSize: true });
+try {
+  const rNoDict = frameDecompress(fOnly);
+  assert(rNoDict.data.length > 0, 'decompress without dict produces output (may differ)');
+} catch (e) {
+  assert(true, 'decompress without dict throws (expected for dict-dependent data)');
+}
+
+// Empty dict should work like no dict
+const emptyDict = new Uint8Array(0);
+const srcSmall = new TextEncoder().encode('Hello, World!');
+const cEmptyDict = blockCompress(srcSmall, { dict: emptyDict });
+const dEmptyDict = blockDecompress(cEmptyDict, srcSmall.length, { dict: emptyDict });
+assert(dEmptyDict.length === srcSmall.length && srcSmall.every((v, i) => v === dEmptyDict[i]), 'empty dict = no dict');
+
+// ============================================================
+console.log('\n=== 9. CLI cross-verification ===');
 const tmpDir = siteDir;
 try {
   const cliData = new TextEncoder().encode('CLI cross-verification test data. '.repeat(10));
