@@ -82,6 +82,25 @@ var App = (() => {
     // Test button
     document.getElementById('btn-test').addEventListener('click', testIntegrity);
 
+    // Folder selection
+    const folderInput = document.getElementById('folder-input');
+    document.getElementById('btn-select-folder').addEventListener('click', () => folderInput.click());
+    folderInput.addEventListener('change', () => {
+      if (folderInput.files.length) {
+        // webkitRelativePath gives subdirectory structure
+        selectedFiles = Array.from(folderInput.files);
+        updateFileList();
+      }
+    });
+
+    // Clear button
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      selectedFiles = [];
+      fileInput.value = '';
+      folderInput.value = '';
+      document.getElementById('compress-result').innerHTML = '';
+    });
+
     // Action change: show/hide test button and level selector
     document.getElementById('file-action').addEventListener('change', (e) => {
       const isDecompress = e.target.value === 'decompress';
@@ -113,10 +132,35 @@ var App = (() => {
   function updateFileList() {
     const resultDiv = document.getElementById('compress-result');
     if (selectedFiles.length === 0) { resultDiv.innerHTML = ''; return; }
+
+    // Detect if files were selected from a folder (have webkitRelativePath)
+    const hasPaths = selectedFiles.some(f => f.webkitRelativePath);
+
     let html = '<div class="file-list">';
-    for (const f of selectedFiles) {
-      html += `<div class="file-item">📄 ${f.name} <span class="file-size">(${formatBytes(f.size)})</span></div>`;
+    if (hasPaths) {
+      // Group by top-level subdirectory
+      const groups = {};
+      for (const f of selectedFiles) {
+        const parts = f.webkitRelativePath.split('/');
+        const dir = parts.length > 2 ? parts.slice(1, -1).join('/') : '(root)';
+        if (!groups[dir]) groups[dir] = [];
+        groups[dir].push(f);
+      }
+      for (const [dir, files] of Object.entries(groups)) {
+        if (dir !== '(root)') {
+          html += `<div class="file-group-header">📁 ${dir}/</div>`;
+        }
+        for (const f of files) {
+          const name = f.webkitRelativePath ? f.webkitRelativePath.split('/').pop() : f.name;
+          html += `<div class="file-item">📄 ${name} <span class="file-size">(${formatBytes(f.size)})</span></div>`;
+        }
+      }
+    } else {
+      for (const f of selectedFiles) {
+        html += `<div class="file-item">📄 ${f.name} <span class="file-size">(${formatBytes(f.size)})</span></div>`;
+      }
     }
+    html += `<div class="file-summary">${selectedFiles.length} ${I18n.t('result.files')}, ${formatBytes(selectedFiles.reduce((s, f) => s + f.size, 0))} ${I18n.t('result.total')}</div>`;
     html += '</div>';
     resultDiv.innerHTML = html;
   }

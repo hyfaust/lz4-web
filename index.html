@@ -130,9 +130,12 @@
           <p style="font-size:0.75rem;margin-top:0.3rem;color:var(--text-dim);" data-i18n="compress.dropHint">支持任意文件压缩，.lz4 文件解压</p>
         </div>
         <input type="file" id="file-input" style="display:none" multiple>
-        <div style="margin-top:0.8rem;display:flex;gap:0.5rem;">
+        <input type="file" id="folder-input" style="display:none" webkitdirectory>
+        <div style="margin-top:0.8rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
           <button class="btn btn-primary" id="btn-process" data-i18n="compress.process">▶ 开始处理</button>
+          <button class="btn btn-sm" id="btn-select-folder" data-i18n="compress.selectFolder">📁 选择文件夹</button>
           <button class="btn btn-sm" id="btn-test" style="display:none" data-i18n="compress.test">🔍 完整性测试</button>
+          <button class="btn btn-sm" id="btn-clear" data-i18n="compress.clear">✕ 清除</button>
         </div>
         <div id="compress-result"></div>
       </div>
