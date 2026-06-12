@@ -76,18 +76,18 @@ var LZ4Block = (() => {
       let bestMatchOff = -1;
       let bestMatchLen = 0;
 
-      if (srcOff + MIN_MATCH <= src.length) {
+      if (srcOff + MIN_MATCH <= src.length - MIN_MATCH) {
         const v = read32le(src, srcOff);
         const h = hash4(v);
         const candidate = hashTable[h];
         hashTable[h] = srcOff;
 
         if (candidate >= 0 && candidate < srcOff && (srcOff - candidate) <= MAX_DISTANCE) {
-          // Verify match
+          // Verify match (don't extend into last MIN_MATCH bytes - spec requirement)
+          const maxMatchEnd = src.length - MIN_MATCH;
           let matchLen = 0;
-          while (srcOff + matchLen < src.length &&
-                 src[candidate + matchLen] === src[srcOff + matchLen] &&
-                 matchLen < src.length - srcOff) {
+          while (srcOff + matchLen < maxMatchEnd &&
+                 src[candidate + matchLen] === src[srcOff + matchLen]) {
             matchLen++;
           }
           if (matchLen >= MIN_MATCH) {

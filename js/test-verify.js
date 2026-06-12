@@ -1,163 +1,197 @@
-// Quick Node.js test to verify LZ4 implementation correctness
+// LZ4 Implementation Test Suite
 // Run: node site/js/test-verify.js
 
-// Polyfill browser APIs for Node.js
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const { execSync } = require('child_process');
+
 if (typeof TextEncoder === 'undefined') {
   const { TextEncoder, TextDecoder } = require('util');
   global.TextEncoder = TextEncoder;
   global.TextDecoder = TextDecoder;
 }
 
-// Load modules in order
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
-const siteDir = path.join(__dirname);
-
-// Create a shared context where all modules can see each other
+const siteDir = __dirname;
 const ctx = vm.createContext({
   console, Math, Uint8Array, Int32Array, TextEncoder, TextDecoder,
   performance, Error, Array, String, Number, Object, Promise, setTimeout,
-  URL, Blob, document: undefined, FileReader: undefined
+  URL, Blob, document: undefined, FileReader: undefined, BigInt
 });
 
-function loadModule(filePath, varName) {
-  const code = fs.readFileSync(filePath, 'utf8');
-  vm.runInContext(code, ctx);
+function loadModule(file) { vm.runInContext(fs.readFileSync(path.join(siteDir, file), 'utf8'), ctx); }
+loadModule('xxhash.js'); loadModule('lz4-block.js'); loadModule('lz4-frame.js'); loadModule('lz4-parser.js');
+
+const { xxh32 } = ctx.XXHash;
+const { compress: blockCompress, decompress: blockDecompress, compressBound } = ctx.LZ4Block;
+const { compress: frameCompress, decompress: frameDecompress } = ctx.LZ4Frame;
+const { parse: frameParse } = ctx.LZ4Parser;
+
+let passed = 0, failed = 0;
+function assert(cond, msg) {
+  if (cond) { passed++; console.log(`  ✓ ${msg}`); }
+  else { failed++; console.log(`  ✗ ${msg}`); }
+}
+function roundtrip(src, opts) {
+  const f = frameCompress(src, opts);
+  const r = frameDecompress(f);
+  return r.data.length === src.length && src.every((v, i) => v === r.data[i]);
 }
 
-loadModule(path.join(siteDir, 'xxhash.js'), 'XXHash');
-loadModule(path.join(siteDir, 'lz4-block.js'), 'LZ4Block');
-loadModule(path.join(siteDir, 'lz4-frame.js'), 'LZ4Frame');
-loadModule(path.join(siteDir, 'lz4-parser.js'), 'LZ4Parser');
+// ============================================================
+console.log('=== 1. xxHash-32 ===');
+assert(xxh32(new Uint8Array(0), 0) === 0x02CC5D05, 'xxh32(empty) = 0x02CC5D05');
+assert(xxh32(new TextEncoder().encode('Hello, World!'), 0) === 0x4007DE50, 'xxh32("Hello, World!") = 0x4007DE50');
+assert(xxh32(new Uint8Array([0x64, 0x40]), 0) === 0x95C0A77C, 'xxh32([0x64,0x40]) = 0x95C0A77C');
 
-const XXHash = ctx.XXHash;
-const LZ4Block = ctx.LZ4Block;
-const LZ4Frame = ctx.LZ4Frame;
-const LZ4Parser = ctx.LZ4Parser;
-
-console.log('=== LZ4 Implementation Verification ===\n');
-
-// Test 1: xxHash-32 basic test
-console.log('Test 1: xxHash-32');
-const testData = new TextEncoder().encode('Hello, World!');
-const hash = XXHash.xxh32(testData, 0);
-console.log(`  xxh32("Hello, World!") = 0x${hash.toString(16).padStart(8, '0')}`);
-console.log(`  Result: ${hash !== 0 ? 'PASS' : 'FAIL'}\n`);
-
-// Test 2: LZ4 Block compress/decompress roundtrip
-console.log('Test 2: LZ4 Block roundtrip');
-const testStrings = [
+// ============================================================
+console.log('\n=== 2. LZ4 Block roundtrip ===');
+const blockTests = [
   'Hello, World!',
   'AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDD',
-  'The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.',
+  'The quick brown fox jumps over the lazy dog. ' + 'The quick brown fox jumps over the lazy dog. ',
   'a'.repeat(1000),
-  'LZ4 is a lossless compression algorithm, providing compression speed >500 MB/s per core, scalable with multi-cores CPU.',
+  'x'.repeat(10000),
+  'LZ4 is a lossless compression algorithm, providing compression speed >500 MB/s per core.',
 ];
-
-let blockPass = true;
-for (const str of testStrings) {
-  const src = new TextEncoder().encode(str);
-  const compressed = LZ4Block.compress(src);
-  const decompressed = LZ4Block.decompress(compressed, src.length);
-  const match = src.length === decompressed.length && src.every((v, i) => v === decompressed[i]);
-  const ratio = (src.length / compressed.length).toFixed(2);
-  console.log(`  "${str.substring(0, 40)}${str.length > 40 ? '...' : ''}" [${src.length}B → ${compressed.length}B, ratio ${ratio}:1] ${match ? 'PASS' : 'FAIL'}`);
-  if (!match) blockPass = false;
+for (const s of blockTests) {
+  const src = new TextEncoder().encode(s);
+  const c = blockCompress(src);
+  const d = blockDecompress(c, src.length);
+  const ok = d.length === src.length && src.every((v, i) => v === d[i]);
+  assert(ok, `"${s.substring(0, 35)}..." [${src.length}B→${c.length}B, ${(src.length/c.length).toFixed(2)}:1]`);
 }
-console.log(`  Overall: ${blockPass ? 'PASS' : 'FAIL'}\n`);
 
-// Test 3: LZ4 Frame compress/decompress roundtrip
-console.log('Test 3: LZ4 Frame roundtrip');
-let framePass = true;
-for (const str of testStrings) {
-  const src = new TextEncoder().encode(str);
-  const frame = LZ4Frame.compress(src, {
-    blockSizeID: 4,
-    contentChecksum: true,
-    contentSize: true
-  });
-  const result = LZ4Frame.decompress(frame);
-  const match = src.length === result.data.length && src.every((v, i) => v === result.data[i]);
-  const ratio = (src.length / frame.length).toFixed(2);
-  console.log(`  "${str.substring(0, 40)}${str.length > 40 ? '...' : ''}" [${src.length}B → ${frame.length}B, ratio ${ratio}:1] ${match ? 'PASS' : 'FAIL'}`);
-  if (!match) framePass = false;
+// ============================================================
+console.log('\n=== 3. Acceleration levels ===');
+const accelSrc = new TextEncoder().encode('The quick brown fox jumps over the lazy dog. '.repeat(50));
+for (const acc of [1, 2, 5, 10, 20]) {
+  const c = blockCompress(accelSrc, { acceleration: acc });
+  const d = blockDecompress(c, accelSrc.length);
+  const ok = d.length === accelSrc.length && accelSrc.every((v, i) => v === d[i]);
+  assert(ok, `acceleration=${acc} [${accelSrc.length}B→${c.length}B, ${(accelSrc.length/c.length).toFixed(2)}:1]`);
 }
-console.log(`  Overall: ${framePass ? 'PASS' : 'FAIL'}\n`);
+// Verify higher acceleration produces smaller or equal speed (larger or equal size)
+const c1 = blockCompress(accelSrc, { acceleration: 1 }).length;
+const c10 = blockCompress(accelSrc, { acceleration: 10 }).length;
+assert(c10 >= c1, `accel=10 size (${c10}) >= accel=1 size (${c1})`);
 
-// Test 4: Frame parser
-console.log('Test 4: Frame parser');
-const parseSrc = new TextEncoder().encode('LZ4 Frame parser test data with some repetition. LZ4 Frame parser test data.');
-const frameData = LZ4Frame.compress(parseSrc, { contentChecksum: true, contentSize: true });
-const parsed = LZ4Parser.parse(frameData);
-console.log(`  Frames: ${parsed.stats.frameCount}`);
-console.log(`  Blocks: ${parsed.stats.blockCount}`);
-console.log(`  Format: ${parsed.frames[0]?.info?.blockSizeName || 'unknown'}`);
-console.log(`  Header valid: ${parsed.frames[0]?.info?.headerChecksumValid}`);
-console.log(`  Result: ${parsed.stats.frameCount === 1 && parsed.stats.blockCount > 0 ? 'PASS' : 'FAIL'}\n`);
-
-// Test 5: Larger data roundtrip
-console.log('Test 5: Large data roundtrip (64KB)');
-const largeData = new Uint8Array(65536);
-let seed = 42;
-for (let i = 0; i < largeData.length; i++) {
-  seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF;
-  largeData[i] = seed & 0xFF;
+// ============================================================
+console.log('\n=== 4. Frame compression levels (compressionLevel option) ===');
+const lvlSrc = new TextEncoder().encode('Frame level test data. '.repeat(200));
+for (const lvl of [1, 3, 6, 9, 12, -1, -5]) {
+  const ok = roundtrip(lvlSrc, { compressionLevel: lvl, contentChecksum: true, contentSize: true });
+  const f = frameCompress(lvlSrc, { compressionLevel: lvl, contentChecksum: true, contentSize: true });
+  assert(ok, `level=${lvl} roundtrip [${lvlSrc.length}B→${f.length}B]`);
 }
-// Add compressible patterns
-for (let i = 0; i < 4096; i++) {
-  largeData[i] = (i % 26) + 65; // A-Z pattern
-}
-const largeFrame = LZ4Frame.compress(largeData, { contentChecksum: true, contentSize: true });
-const largeResult = LZ4Frame.decompress(largeFrame);
-const largeMatch = largeData.length === largeResult.data.length && largeData.every((v, i) => v === largeResult.data[i]);
-console.log(`  Size: ${largeData.length}B → ${largeFrame.length}B (${(largeData.length / largeFrame.length).toFixed(2)}:1)`);
-console.log(`  Roundtrip: ${largeMatch ? 'PASS' : 'FAIL'}\n`);
 
-// Test 6: Verify against lz4 CLI (if available)
-console.log('Test 6: CLI cross-verification');
+// ============================================================
+console.log('\n=== 5. Frame options: contentSize, contentChecksum, blockChecksum ===');
+const optSrc = new TextEncoder().encode('Options test. '.repeat(100));
+
+// contentSize=false
+{
+  const f = frameCompress(optSrc, { contentSize: false, contentChecksum: true });
+  const r = frameDecompress(f);
+  assert(r.data.length === optSrc.length && optSrc.every((v, i) => v === r.data[i]), 'contentSize=false roundtrip');
+  const p = frameParse(f);
+  assert(p.frames[0].info.contentSizeFlag === false || p.frames[0].info.contentSize === 0, 'contentSize not in frame');
+}
+
+// contentChecksum=false (no-frame-crc)
+{
+  const f = frameCompress(optSrc, { contentChecksum: false, contentSize: true });
+  const r = frameDecompress(f);
+  assert(r.data.length === optSrc.length && optSrc.every((v, i) => v === r.data[i]), 'contentChecksum=false roundtrip');
+}
+
+// blockChecksum=true
+{
+  const f = frameCompress(optSrc, { blockChecksum: true, contentChecksum: true, contentSize: true });
+  const r = frameDecompress(f);
+  assert(r.data.length === optSrc.length && optSrc.every((v, i) => v === r.data[i]), 'blockChecksum=true roundtrip');
+  const p = frameParse(f);
+  assert(!!p.frames[0].info.blockChecksumFlag, 'block checksum present in frame');
+}
+
+// ============================================================
+console.log('\n=== 6. Frame parser accuracy ===');
+const parserSrc = new TextEncoder().encode('Parser accuracy test with repetition. Parser accuracy test. '.repeat(20));
+for (const opts of [
+  { contentChecksum: true, contentSize: true },
+  { contentChecksum: false, contentSize: false },
+  { blockChecksum: true, contentChecksum: true },
+  { blockSizeID: 4, contentChecksum: true },
+  { blockSizeID: 6, contentChecksum: true },
+]) {
+  const f = frameCompress(parserSrc, opts);
+  const p = frameParse(f);
+  assert(p.stats.frameCount === 1, `parser: 1 frame (opts=${JSON.stringify(opts).substring(0, 50)})`);
+  assert(p.stats.blockCount > 0, `parser: ${p.stats.blockCount} block(s)`);
+  assert(p.frames[0].info.headerChecksumValid === true, 'parser: header CRC valid');
+}
+
+// ============================================================
+console.log('\n=== 7. Large data roundtrip (64KB + 256KB) ===');
+for (const size of [65536, 262144]) {
+  const data = new Uint8Array(size);
+  let s = 42;
+  for (let i = 0; i < size; i++) { s = (s * 1103515245 + 12345) & 0x7FFFFFFF; data[i] = s & 0xFF; }
+  for (let i = 0; i < 8192; i++) data[i] = (i % 26) + 65;
+
+  const f = frameCompress(data, { contentChecksum: true, contentSize: true });
+  const r = frameDecompress(f);
+  const ok = r.data.length === data.length && data.every((v, i) => v === r.data[i]);
+  assert(ok, `${size}B roundtrip [→${f.length}B, ${(size/f.length).toFixed(2)}:1]`);
+}
+
+// ============================================================
+console.log('\n=== 8. CLI cross-verification ===');
+const tmpDir = siteDir;
 try {
-  const { execSync } = require('child_process');
-  const testFile = path.join(__dirname, '_test_input.tmp');
-  const lz4File = path.join(__dirname, '_test_output.tmp.lz4');
-  const decFile = path.join(__dirname, '_test_decoded.tmp');
+  const cliData = new TextEncoder().encode('CLI cross-verification test data. '.repeat(10));
+  const fIn = path.join(tmpDir, '_t_in.tmp');
+  const fLz4 = path.join(tmpDir, '_t_out.tmp.lz4');
+  const fDec = path.join(tmpDir, '_t_dec.tmp');
 
-  // Write test data
-  const cliTestData = new TextEncoder().encode('CLI cross-verification test. This data should survive a roundtrip through both CLI and JS implementation.');
-  fs.writeFileSync(testFile, cliTestData);
+  fs.writeFileSync(fIn, cliData);
 
-  // Compress with CLI
-  execSync(`lz4 -f "${testFile}" "${lz4File}"`);
-  const cliCompressed = new Uint8Array(fs.readFileSync(lz4File));
+  // CLI compress → JS decompress
+  execSync(`lz4 -f "${fIn}" "${fLz4}"`);
+  const cliFrame = new Uint8Array(fs.readFileSync(fLz4));
+  const cliParsed = frameParse(cliFrame);
+  assert(cliParsed.frames[0].info.headerChecksumValid === true, 'CLI frame header CRC valid');
+  const cliDec = frameDecompress(cliFrame);
+  assert(cliData.length === cliDec.data.length && cliData.every((v, i) => v === cliDec.data[i]), 'CLI→JS decompress');
 
-  // Parse CLI output with our parser
-  const cliParsed = LZ4Parser.parse(cliCompressed);
-  console.log(`  CLI compressed frame: ${cliParsed.stats.frameCount} frame(s), ${cliParsed.stats.blockCount} block(s)`);
-  console.log(`  Header valid: ${cliParsed.frames[0]?.info?.headerChecksumValid}`);
+  // JS compress → CLI decompress
+  const jsFrame = frameCompress(cliData, { contentChecksum: true, contentSize: true });
+  fs.writeFileSync(fLz4, jsFrame);
+  execSync(`lz4 -d -f "${fLz4}" "${fDec}"`);
+  const cliDecoded = new Uint8Array(fs.readFileSync(fDec));
+  assert(cliData.length === cliDecoded.length && cliData.every((v, i) => v === cliDecoded[i]), 'JS→CLI decompress');
 
-  // Decompress CLI output with our JS implementation
-  const cliDecResult = LZ4Frame.decompress(cliCompressed);
-  const cliMatch = cliTestData.length === cliDecResult.data.length && cliTestData.every((v, i) => v === cliDecResult.data[i]);
-  console.log(`  CLI→JS decompress: ${cliMatch ? 'PASS' : 'FAIL'}`);
+  // CLI with different options
+  execSync(`lz4 -9 -f "${fIn}" "${fLz4}"`);
+  const cli9 = new Uint8Array(fs.readFileSync(fLz4));
+  const cli9Dec = frameDecompress(cli9);
+  assert(cliData.length === cli9Dec.data.length && cliData.every((v, i) => v === cli9Dec.data[i]), 'CLI -9 → JS decompress');
 
-  // Compress with JS, decompress with CLI
-  const jsCompressed = LZ4Frame.compress(cliTestData, { contentChecksum: true, contentSize: true });
-  fs.writeFileSync(lz4File, jsCompressed);
-  try {
-    execSync(`lz4 -d -f "${lz4File}" "${decFile}"`);
-    const cliDecoded = new Uint8Array(fs.readFileSync(decFile));
-    const jsCliMatch = cliTestData.length === cliDecoded.length && cliTestData.every((v, i) => v === cliDecoded[i]);
-    console.log(`  JS→CLI decompress: ${jsCliMatch ? 'PASS' : 'FAIL'}`);
-  } catch (e) {
-    console.log(`  JS→CLI decompress: FAIL (${e.message.substring(0, 80)})`);
-  }
+  execSync(`lz4 --content-size -f "${fIn}" "${fLz4}"`);
+  const cliCS = new Uint8Array(fs.readFileSync(fLz4));
+  const cliCSParsed = frameParse(cliCS);
+  assert(cliCSParsed.frames[0].info.contentSize === cliData.length, `CLI --content-size: ${cliCSParsed.frames[0].info.contentSize} === ${cliData.length}`);
 
-  // Cleanup
-  try { fs.unlinkSync(testFile); } catch {}
-  try { fs.unlinkSync(lz4File); } catch {}
-  try { fs.unlinkSync(decFile); } catch {}
+  try { fs.unlinkSync(fIn); } catch {}
+  try { fs.unlinkSync(fLz4); } catch {}
+  try { fs.unlinkSync(fDec); } catch {}
 } catch (e) {
-  console.log(`  CLI not available: ${e.message.substring(0, 80)}`);
+  console.log(`  CLI test error: ${e.message.substring(0, 100)}`);
+  failed++;
 }
 
-console.log('\n=== Done ===');
+// ============================================================
+console.log(`\n${'='.repeat(50)}`);
+console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+console.log(`${'='.repeat(50)}`);
+process.exit(failed > 0 ? 1 : 0);
