@@ -126,6 +126,7 @@ var App = (() => {
     const action = document.getElementById('file-action').value;
     const resultDiv = document.getElementById('compress-result');
     const results = [];
+    const STREAM_THRESHOLD = 4 * 1024 * 1024; // Use streaming for files > 4MB
 
     resultDiv.innerHTML = `<div class="loading">${I18n.t('result.processing')}</div>`;
 
@@ -134,10 +135,22 @@ var App = (() => {
       try {
         let result;
         if (action === 'compress') {
-          result = await LZ4Compress.handleFileCompress(file, getCompressOptions());
+          if (file.size > STREAM_THRESHOLD && typeof LZ4Stream !== 'undefined') {
+            // Streaming mode for large files
+            const opts = getCompressOptions();
+            const streamResult = await LZ4Stream.compressFile(file, opts);
+            result = { data: streamResult.data, ...streamResult.stats, inputName: file.name };
+          } else {
+            result = await LZ4Compress.handleFileCompress(file, getCompressOptions());
+          }
           result.filename = file.name + '.lz4';
         } else {
-          result = await LZ4Compress.handleFileDecompress(file, { dictData: dictData });
+          if (file.size > STREAM_THRESHOLD && typeof LZ4Stream !== 'undefined') {
+            const streamResult = await LZ4Stream.decompressFile(file);
+            result = { data: streamResult.data, ...streamResult.stats, inputName: file.name };
+          } else {
+            result = await LZ4Compress.handleFileDecompress(file, { dictData: dictData });
+          }
           result.filename = file.name.endsWith('.lz4') ? file.name.slice(0, -4) : file.name + '.dec';
         }
         result.inputName = file.name;

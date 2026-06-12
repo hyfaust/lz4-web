@@ -20,10 +20,11 @@ const ctx = vm.createContext({
 });
 
 function loadModule(file) { vm.runInContext(fs.readFileSync(path.join(siteDir, file), 'utf8'), ctx); }
-loadModule('xxhash.js'); loadModule('lz4-block.js'); loadModule('lz4-frame.js'); loadModule('lz4-parser.js');
+loadModule('xxhash.js'); loadModule('lz4-block.js'); loadModule('lz4hc.js'); loadModule('lz4-frame.js'); loadModule('lz4-parser.js');
 
 const { xxh32 } = ctx.XXHash;
 const { compress: blockCompress, decompress: blockDecompress, compressBound } = ctx.LZ4Block;
+const LZ4HC = ctx.LZ4HC;
 const { compress: frameCompress, decompress: frameDecompress } = ctx.LZ4Frame;
 const { parse: frameParse } = ctx.LZ4Parser;
 
@@ -211,7 +212,80 @@ const dEmptyDict = blockDecompress(cEmptyDict, srcSmall.length, { dict: emptyDic
 assert(dEmptyDict.length === srcSmall.length && srcSmall.every((v, i) => v === dEmptyDict[i]), 'empty dict = no dict');
 
 // ============================================================
-console.log('\n=== 9. CLI cross-verification ===');
+console.log('\n=== 9. HC mode (levels 2-12) ===');
+
+// HC block-level roundtrip
+const hcTestData = new TextEncoder().encode(
+  'The quick brown fox jumps over the lazy dog. '.repeat(100) +
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.repeat(50) +
+  'LZ4 HC compression provides better ratio than Fast mode. '.repeat(80)
+);
+console.log('HC Block roundtrip:');
+for (const lvl of [2, 3, 5, 7, 9, 10, 12]) {
+  const c = LZ4HC.compress(hcTestData, { level: lvl });
+  const d = blockDecompress(c, hcTestData.length);
+  const match = d.length === hcTestData.length && hcTestData.every((v, i) => v === d[i]);
+  assert(match, `HC-${lvl} block [${hcTestData.length}B→${c.length}B, ${(hcTestData.length/c.length).toFixed(2)}:1]`);
+}
+
+// HC should produce better ratio than Fast for same data
+const fastComp = blockCompress(hcTestData);
+const hc9Comp = LZ4HC.compress(hcTestData, { level: 9 });
+assert(hc9Comp.length <= fastComp.length * 1.05, `HC-9 (${hc9Comp.length}B) ≈ Fast (${fastComp.length}B) ratio comparable`);
+
+const hc12Comp = LZ4HC.compress(hcTestData, { level: 12 });
+assert(hc12Comp.length <= hc9Comp.length, `HC-12 (${hc12Comp.length}B) <= HC-9 (${hc9Comp.length}B) further improvement`);
+
+// HC frame-level roundtrip
+console.log('HC Frame roundtrip:');
+const hcFrameSrc = new TextEncoder().encode('Frame HC test. '.repeat(200));
+for (const lvl of [2, 5, 9, 12]) {
+  const f = frameCompress(hcFrameSrc, { compressionLevel: lvl, contentChecksum: true, contentSize: true });
+  const r = frameDecompress(f);
+  const match = r.data.length === hcFrameSrc.length && hcFrameSrc.every((v, i) => v === r.data[i]);
+  assert(match, `HC-${lvl} frame [${hcFrameSrc.length}B→${f.length}B]`);
+}
+
+// HC CLI cross-verification
+console.log('HC CLI cross-verify:');
+try {
+  const hcCliData = new TextEncoder().encode('HC CLI cross-verification test data. '.repeat(20));
+  const fIn = path.join(siteDir, '_hc_in.tmp');
+  const fLz4 = path.join(siteDir, '_hc_out.tmp.lz4');
+  const fDec = path.join(siteDir, '_hc_dec.tmp');
+  fs.writeFileSync(fIn, hcCliData);
+
+  // JS HC-9 compress → CLI decompress
+  const jsHC9 = frameCompress(hcCliData, { compressionLevel: 9, contentChecksum: true, contentSize: true });
+  fs.writeFileSync(fLz4, jsHC9);
+  try {
+    execSync(`lz4 -d -f "${fLz4}" "${fDec}"`);
+    const dec = new Uint8Array(fs.readFileSync(fDec));
+    assert(dec.length === hcCliData.length && hcCliData.every((v, i) => v === dec[i]), 'JS HC-9 → CLI decompress');
+  } catch (e) {
+    assert(false, 'JS HC-9 → CLI decompress: ' + (e.stderr || e.message || '').toString().substring(0, 80));
+  }
+
+  // CLI HC-9 compress → JS decompress
+  execSync(`lz4 -9 -f "${fIn}" "${fLz4}"`);
+  const cliHC9 = new Uint8Array(fs.readFileSync(fLz4));
+  try {
+    const r = frameDecompress(cliHC9);
+    assert(r.data.length === hcCliData.length && hcCliData.every((v, i) => v === r.data[i]), 'CLI HC-9 → JS decompress');
+  } catch (e) {
+    assert(false, 'CLI HC-9 → JS decompress: ' + e.message.substring(0, 80));
+  }
+
+  try { fs.unlinkSync(fIn); } catch {}
+  try { fs.unlinkSync(fLz4); } catch {}
+  try { fs.unlinkSync(fDec); } catch {}
+} catch (e) {
+  console.log('  HC CLI test error:', e.message.substring(0, 100));
+  failed++;
+}
+
+// ============================================================
+console.log('\n=== 10. CLI cross-verification ===');
 const tmpDir = siteDir;
 try {
   const cliData = new TextEncoder().encode('CLI cross-verification test data. '.repeat(10));

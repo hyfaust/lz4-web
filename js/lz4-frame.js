@@ -138,7 +138,13 @@ var LZ4Frame = (() => {
     while (srcOff < src.length) {
       const chunkSize = Math.min(blockSize, src.length - srcOff);
       const blockData = src.slice(srcOff, srcOff + chunkSize);
-      const compressed = LZ4Block.compress(blockData, { acceleration, dict: dictData });
+      // Use HC compressor for levels >= 2, Fast compressor for level 1
+      let compressed;
+      if (compressionLevel >= 2 && typeof LZ4HC !== 'undefined') {
+        compressed = LZ4HC.compress(blockData, { level: compressionLevel, dict: dictData });
+      } else {
+        compressed = LZ4Block.compress(blockData, { acceleration, dict: dictData });
+      }
 
       let isCompressed = false;
       let blockDataToWrite;
