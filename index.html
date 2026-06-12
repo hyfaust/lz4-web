@@ -52,6 +52,27 @@
             <option value="decompress" data-i18n="compress.action.decompress">解压</option>
           </select>
         </div>
+        <div class="form-group" id="level-group">
+          <label data-i18n="compress.level">压缩级别</label>
+          <select id="opt-level">
+            <option value="1" selected>1 — Fast (默认)</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <option value="11">11</option>
+            <option value="12">12 — 最慢/最佳</option>
+            <option value="-1">--fast=1 (极速)</option>
+            <option value="-2">--fast=2</option>
+            <option value="-5">--fast=5</option>
+            <option value="-10">--fast=10</option>
+          </select>
+        </div>
         <div class="form-group">
           <label data-i18n="compress.blockSize">块大小</label>
           <select id="opt-block-size">
@@ -68,6 +89,8 @@
             <option value="1" selected data-i18n="compress.blockMode.independent">独立模式</option>
           </select>
         </div>
+      </div>
+      <div class="form-row">
         <div class="form-group">
           <label>&nbsp;</label>
           <div style="display:flex;gap:1rem;">
@@ -79,6 +102,22 @@
               <input type="checkbox" id="opt-block-crc">
               <label for="opt-block-crc" data-i18n="compress.blockCRC">块校验</label>
             </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="opt-content-size" checked>
+              <label for="opt-content-size" data-i18n="compress.contentSize">内容大小</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="opt-no-frame-crc">
+              <label for="opt-no-frame-crc" data-i18n="compress.noFrameCRC">禁用帧校验</label>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" id="dict-group">
+          <label data-i18n="compress.dictionary">字典文件 (可选)</label>
+          <div class="dict-upload">
+            <input type="file" id="dict-input" style="display:none" accept=".dict,.bin,*">
+            <button class="btn btn-sm" id="btn-dict-select" data-i18n="compress.selectDict">选择字典</button>
+            <span id="dict-name" class="dict-name" data-i18n="compress.noDict">未选择</span>
           </div>
         </div>
       </div>
@@ -90,7 +129,11 @@
           <p data-i18n="compress.dropText">拖拽文件到此处或点击选择</p>
           <p style="font-size:0.75rem;margin-top:0.3rem;color:var(--text-dim);" data-i18n="compress.dropHint">支持任意文件压缩，.lz4 文件解压</p>
         </div>
-        <input type="file" id="file-input" style="display:none">
+        <input type="file" id="file-input" style="display:none" multiple>
+        <div style="margin-top:0.8rem;display:flex;gap:0.5rem;">
+          <button class="btn btn-primary" id="btn-process" data-i18n="compress.process">▶ 开始处理</button>
+          <button class="btn btn-sm" id="btn-test" style="display:none" data-i18n="compress.test">🔍 完整性测试</button>
+        </div>
         <div id="compress-result"></div>
       </div>
 

@@ -752,6 +752,39 @@ textarea {
   border-radius: 2px;
 }
 
+/* ========== File List ========== */
+.file-list {
+  margin-top: 1rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.file-item {
+  padding: 0.4rem 0.8rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.file-size {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+/* ========== Dict Upload ========== */
+.dict-upload {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dict-name {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
 /* ========== Loading ========== */
 .loading {
   text-align: center;

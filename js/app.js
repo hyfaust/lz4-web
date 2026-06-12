@@ -39,6 +39,9 @@ var App = (() => {
   }
 
   // ========== Compress Tab ==========
+  let selectedFiles = [];
+  let dictData = null;
+
   function setupCompressTab() {
     // Mode toggle
     document.querySelectorAll('.mode-btn').forEach(btn => {
@@ -51,7 +54,7 @@ var App = (() => {
       });
     });
 
-    // File compress
+    // File selection
     const fileInput = document.getElementById('file-input');
     const dropZone = document.getElementById('drop-zone');
 
@@ -61,10 +64,45 @@ var App = (() => {
     dropZone.addEventListener('drop', e => {
       e.preventDefault();
       dropZone.classList.remove('drag-over');
-      if (e.dataTransfer.files.length) processFile(e.dataTransfer.files[0]);
+      if (e.dataTransfer.files.length) {
+        selectedFiles = Array.from(e.dataTransfer.files);
+        updateFileList();
+      }
     });
     fileInput.addEventListener('change', () => {
-      if (fileInput.files.length) processFile(fileInput.files[0]);
+      if (fileInput.files.length) {
+        selectedFiles = Array.from(fileInput.files);
+        updateFileList();
+      }
+    });
+
+    // Process button
+    document.getElementById('btn-process').addEventListener('click', processAllFiles);
+
+    // Test button
+    document.getElementById('btn-test').addEventListener('click', testIntegrity);
+
+    // Action change: show/hide test button and level selector
+    document.getElementById('file-action').addEventListener('change', (e) => {
+      const isDecompress = e.target.value === 'decompress';
+      document.getElementById('btn-test').style.display = isDecompress ? '' : 'none';
+      document.getElementById('level-group').style.display = isDecompress ? 'none' : '';
+      document.getElementById('dict-group').style.display = isDecompress ? 'none' : '';
+    });
+
+    // Dictionary file
+    const dictInput = document.getElementById('dict-input');
+    document.getElementById('btn-dict-select').addEventListener('click', () => dictInput.click());
+    dictInput.addEventListener('change', () => {
+      if (dictInput.files.length) {
+        const file = dictInput.files[0];
+        const reader = new FileReader();
+        reader.onload = () => {
+          dictData = new Uint8Array(reader.result);
+          document.getElementById('dict-name').textContent = file.name + ` (${formatBytes(dictData.length)})`;
+        };
+        reader.readAsArrayBuffer(file);
+      }
     });
 
     // Text compress
@@ -72,58 +110,124 @@ var App = (() => {
     document.getElementById('btn-text-decompress').addEventListener('click', textDecompress);
   }
 
-  async function processFile(file) {
+  function updateFileList() {
+    const resultDiv = document.getElementById('compress-result');
+    if (selectedFiles.length === 0) { resultDiv.innerHTML = ''; return; }
+    let html = '<div class="file-list">';
+    for (const f of selectedFiles) {
+      html += `<div class="file-item">📄 ${f.name} <span class="file-size">(${formatBytes(f.size)})</span></div>`;
+    }
+    html += '</div>';
+    resultDiv.innerHTML = html;
+  }
+
+  async function processAllFiles() {
+    if (selectedFiles.length === 0) { alert(I18n.t('compress.noFile')); return; }
     const action = document.getElementById('file-action').value;
     const resultDiv = document.getElementById('compress-result');
+    const results = [];
+
     resultDiv.innerHTML = `<div class="loading">${I18n.t('result.processing')}</div>`;
 
-    try {
-      if (action === 'compress') {
-        const options = getCompressOptions();
-        const result = await LZ4Compress.handleFileCompress(file, options);
-        resultDiv.innerHTML = `
-          <div class="result-card success">
-            <h3>${I18n.t('result.compressDone')}</h3>
-            <div class="stats-grid">
-              <div class="stat"><label>${I18n.t('result.original')}</label><span>${formatBytes(result.originalSize)}</span></div>
-              <div class="stat"><label>${I18n.t('result.compressed')}</label><span>${formatBytes(result.compressedSize)}</span></div>
-              <div class="stat"><label>${I18n.t('result.ratio')}</label><span>${result.ratio}:1</span></div>
-              <div class="stat"><label>${I18n.t('result.time')}</label><span>${result.elapsed} ms</span></div>
-              <div class="stat"><label>${I18n.t('result.speed')}</label><span>${result.speed} MB/s</span></div>
-            </div>
-            <button class="btn btn-primary" onclick="App.downloadResult()">${I18n.t('result.download')}</button>
-          </div>`;
-        window._lastResult = { data: result.data, filename: file.name + '.lz4' };
-      } else {
-        const result = await LZ4Compress.handleFileDecompress(file);
-        const origName = file.name.endsWith('.lz4') ? file.name.slice(0, -4) : file.name + '.dec';
-        resultDiv.innerHTML = `
-          <div class="result-card success">
-            <h3>${I18n.t('result.decompressDone')}</h3>
-            <div class="stats-grid">
-              <div class="stat"><label>${I18n.t('result.compressed')}</label><span>${formatBytes(result.compressedSize)}</span></div>
-              <div class="stat"><label>${I18n.t('result.decompressed')}</label><span>${formatBytes(result.decompressedSize)}</span></div>
-              <div class="stat"><label>${I18n.t('result.ratio')}</label><span>${result.ratio}:1</span></div>
-              <div class="stat"><label>${I18n.t('result.time')}</label><span>${result.elapsed} ms</span></div>
-              <div class="stat"><label>${I18n.t('result.speed')}</label><span>${result.speed} MB/s</span></div>
-            </div>
-            <button class="btn btn-primary" onclick="App.downloadResult()">${I18n.t('result.downloadFile')}</button>
-          </div>`;
-        window._lastResult = { data: result.data, filename: origName };
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      try {
+        let result;
+        if (action === 'compress') {
+          result = await LZ4Compress.handleFileCompress(file, getCompressOptions());
+          result.filename = file.name + '.lz4';
+        } else {
+          result = await LZ4Compress.handleFileDecompress(file);
+          result.filename = file.name.endsWith('.lz4') ? file.name.slice(0, -4) : file.name + '.dec';
+        }
+        result.inputName = file.name;
+        results.push(result);
+      } catch (e) {
+        results.push({ inputName: file.name, error: e.message });
       }
-    } catch (e) {
-      resultDiv.innerHTML = `<div class="result-card error"><h3>${I18n.t('result.error')}</h3><p>${e.message}</p></div>`;
     }
+
+    // Render results
+    let html = '';
+    const allSuccess = results.every(r => !r.error);
+    html += `<div class="result-card ${allSuccess ? 'success' : 'error'}">`;
+    html += `<h3>${action === 'compress' ? I18n.t('result.compressDone') : I18n.t('result.decompressDone')} (${results.length} ${I18n.t('result.files')})</h3>`;
+
+    html += '<table class="bench-table"><thead><tr>';
+    html += `<th>${I18n.t('result.fileName')}</th><th>${I18n.t('result.original')}</th><th>${action === 'compress' ? I18n.t('result.compressed') : I18n.t('result.decompressed')}</th><th>${I18n.t('result.ratio')}</th><th>${I18n.t('result.time')}</th>`;
+    html += '</tr></thead><tbody>';
+
+    for (const r of results) {
+      if (r.error) {
+        html += `<tr><td>${r.inputName}</td><td colspan="4" style="color:var(--error)">${r.error}</td></tr>`;
+      } else {
+        const origSize = action === 'compress' ? r.originalSize : r.compressedSize;
+        const outSize = action === 'compress' ? r.compressedSize : r.decompressedSize;
+        html += `<tr><td>${r.inputName}</td><td>${formatBytes(origSize)}</td><td>${formatBytes(outSize)}</td><td>${r.ratio}:1</td><td>${r.elapsed} ms</td></tr>`;
+      }
+    }
+    html += '</tbody></table>';
+
+    if (allSuccess && results.length > 0) {
+      html += `<button class="btn btn-primary" onclick="App.downloadAll()">${I18n.t('result.downloadAll')}</button>`;
+    }
+    html += '</div>';
+    resultDiv.innerHTML = html;
+
+    window._lastResults = results.filter(r => !r.error);
+  }
+
+  function downloadAll() {
+    if (!window._lastResults) return;
+    for (const r of window._lastResults) {
+      LZ4Compress.downloadFile(r.data, r.filename);
+    }
+  }
+
+  async function testIntegrity() {
+    if (selectedFiles.length === 0) { alert(I18n.t('compress.noFile')); return; }
+    const resultDiv = document.getElementById('compress-result');
+    resultDiv.innerHTML = `<div class="loading">${I18n.t('result.testing')}</div>`;
+
+    let html = '<div class="result-card success"><h3>' + I18n.t('result.testResults') + '</h3>';
+    html += '<table class="bench-table"><thead><tr>';
+    html += `<th>${I18n.t('result.fileName')}</th><th>${I18n.t('result.status')}</th><th>${I18n.t('result.original')}</th><th>${I18n.t('result.decompressed')}</th>`;
+    html += '</tr></thead><tbody>';
+
+    for (const file of selectedFiles) {
+      try {
+        const data = await readFileAsUint8(file);
+        const decompressed = LZ4Frame.decompress(data);
+        const match = decompressed.data.length > 0;
+        html += `<tr><td>${file.name}</td><td style="color:var(--success)">✓ OK</td><td>${formatBytes(data.length)}</td><td>${formatBytes(decompressed.data.length)}</td></tr>`;
+      } catch (e) {
+        html += `<tr><td>${file.name}</td><td style="color:var(--error)">✗ FAIL</td><td colspan="2">${e.message}</td></tr>`;
+      }
+    }
+    html += '</tbody></table></div>';
+    resultDiv.innerHTML = html;
+  }
+
+  function readFileAsUint8(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
   }
 
   function getCompressOptions() {
     const blockSize = parseInt(document.getElementById('opt-block-size').value);
+    const level = parseInt(document.getElementById('opt-level').value);
     return {
+      compressionLevel: level,
       blockSizeID: blockSize,
       blockMode: parseInt(document.getElementById('opt-block-mode').value),
-      contentChecksum: document.getElementById('opt-content-crc').checked,
+      contentChecksum: document.getElementById('opt-content-crc').checked && !document.getElementById('opt-no-frame-crc').checked,
       blockChecksum: document.getElementById('opt-block-crc').checked,
-      contentSize: true
+      contentSize: document.getElementById('opt-content-size').checked,
+      dictData: dictData
     };
   }
 
@@ -386,7 +490,7 @@ var App = (() => {
     return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
   }
 
-  return { init, downloadResult };
+  return { init, downloadResult, downloadAll };
 })();
 
 document.addEventListener('DOMContentLoaded', App.init);

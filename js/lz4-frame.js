@@ -66,6 +66,10 @@ var LZ4Frame = (() => {
     const blockChecksum = options.blockChecksum || false;
     const contentSize = options.contentSize !== undefined ? options.contentSize : true;
     const dictID = options.dictID || 0;
+    // Compression level: 1=default(best ratio), 2+=faster with less ratio
+    // Negative values = explicit acceleration factor (--fast mode)
+    const compressionLevel = options.compressionLevel || 1;
+    const acceleration = compressionLevel < 0 ? Math.abs(compressionLevel) : Math.max(1, compressionLevel);
 
     const blockSize = BlockMaxSize[blockSizeID] || BlockMaxSize[4];
 
@@ -133,7 +137,7 @@ var LZ4Frame = (() => {
     while (srcOff < src.length) {
       const chunkSize = Math.min(blockSize, src.length - srcOff);
       const blockData = src.slice(srcOff, srcOff + chunkSize);
-      const compressed = LZ4Block.compress(blockData);
+      const compressed = LZ4Block.compress(blockData, { acceleration });
 
       let isCompressed = false;
       let blockDataToWrite;

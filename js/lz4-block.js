@@ -54,10 +54,12 @@ var LZ4Block = (() => {
   /**
    * Compress data using LZ4 block format.
    * @param {Uint8Array} src - source data
+   * @param {Object} options - { acceleration: number } (1=best ratio, higher=faster)
    * @returns {Uint8Array} compressed data
    */
-  function compress(src) {
+  function compress(src, options = {}) {
     if (src.length === 0) return new Uint8Array(0);
+    const acceleration = Math.max(1, options.acceleration || 1);
 
     // Output buffer: worst case = src.length + src.length/255 + 16
     const maxDst = src.length + Math.floor(src.length / 255) + 16;
@@ -139,7 +141,8 @@ var LZ4Block = (() => {
           }
         }
       } else {
-        srcOff++;
+        // No match found: skip positions based on acceleration
+        srcOff += acceleration;
       }
 
       // Safety: if output is getting too large, bail
