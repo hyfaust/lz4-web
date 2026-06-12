@@ -398,7 +398,127 @@ try {
 }
 
 // ============================================================
-console.log('\n=== 15. CLI cross-verification ===');
+console.log('\n=== 16. Skippable Frame ===');
+
+// Basic creation
+const skipData = new TextEncoder().encode('{"version":1,"author":"test"}');
+const skipFrame = ctx.LZ4Frame.createSkippableFrame(skipData);
+assert(skipFrame.length === 8 + skipData.length, `Skippable frame size: ${skipFrame.length} = 8 + ${skipData.length}`);
+// Verify magic number
+const skipMagic = (skipFrame[0] | (skipFrame[1] << 8) | (skipFrame[2] << 16) | (skipFrame[3] << 24)) >>> 0;
+assert(skipMagic === 0x184D2A50, `Magic = 0x${skipMagic.toString(16)} (expected 0x184d2a50)`);
+// Verify size field
+const skipSize = (skipFrame[4] | (skipFrame[5] << 8) | (skipFrame[6] << 16) | (skipFrame[7] << 24)) >>> 0;
+assert(skipSize === skipData.length, `Size field = ${skipSize} (expected ${skipData.length})`);
+// Verify user data
+const extractedData = skipFrame.slice(8);
+assert(extractedData.length === skipData.length && skipData.every((v, i) => v === extractedData[i]),
+  'User data preserved correctly');
+
+// String input
+const skipStr = ctx.LZ4Frame.createSkippableFrame('hello world');
+assert(skipStr.length === 8 + 11, 'String input creates correct size');
+
+// Magic variant (0-15)
+for (let v = 0; v <= 15; v++) {
+  const f = ctx.LZ4Frame.createSkippableFrame(new Uint8Array([v]), v);
+  const m = (f[0] | (f[1] << 8) | (f[2] << 16) | (f[3] << 24)) >>> 0;
+  assert(m === 0x184D2A50 + v, `Variant ${v}: magic = 0x${m.toString(16)}`);
+}
+
+// Invalid variant
+try {
+  ctx.LZ4Frame.createSkippableFrame('test', 16);
+  assert(false, 'Should throw for variant 16');
+} catch (e) {
+  assert(e.message.includes('magicVariant'), 'Throws for invalid variant');
+}
+
+// Empty data
+const emptySkip = ctx.LZ4Frame.createSkippableFrame(new Uint8Array(0));
+assert(emptySkip.length === 8, 'Empty skippable frame = 8 bytes');
+
+// Parser recognizes skippable frame
+const parsed = ctx.LZ4Parser.parse(skipFrame);
+assert(parsed.frames.length === 1, 'Parser finds 1 frame');
+assert(parsed.frames[0].type === 'skippable', 'Frame type = skippable');
+assert(parsed.frames[0].info.format === 'Skippable', 'Format = Skippable');
+assert(parsed.frames[0].info.frameSize === skipData.length, `Frame size = ${skipData.length}`);
+
+// CLI can decompress past skippable frame
+try {
+  const lz4Data = new TextEncoder().encode('test data for CLI skip');
+  const lz4Frame = ctx.LZ4Frame.compress(lz4Data, { contentChecksum: true, contentSize: true });
+
+  // Concatenate: skippable + standard frame
+  const stream = ctx.LZ4Frame.concatFrames([skipFrame, lz4Frame]);
+
+  // Write to file and let CLI decompress (should skip the skippable frame)
+  const fTmp = path.join(siteDir, '_skip_test.lz4');
+  const fDec = path.join(siteDir, '_skip_dec.tmp');
+  fs.writeFileSync(fTmp, stream);
+  try {
+    execSync(`lz4 -d -f "${fTmp}" "${fDec}"`);
+    const dec = new Uint8Array(fs.readFileSync(fDec));
+    assert(dec.length === lz4Data.length && lz4Data.every((v, i) => v === dec[i]),
+      'CLI skips skippable frame, decompresses standard frame');
+  } catch (e) {
+    assert(false, 'CLI skip test: ' + (e.stderr || e.message || '').toString().substring(0, 80));
+  }
+  try { fs.unlinkSync(fTmp); } catch {}
+  try { fs.unlinkSync(fDec); } catch {}
+} catch (e) {
+  console.log('  CLI skip test error:', e.message.substring(0, 100));
+  failed++;
+}
+
+// parseFrameStream: mixed frames
+const streamData1 = new TextEncoder().encode('first frame data');
+const streamData2 = new TextEncoder().encode('second frame data');
+const metadata = new TextEncoder().encode('{"key":"value"}');
+const f1 = ctx.LZ4Frame.compress(streamData1, { contentChecksum: true, contentSize: true });
+const f2 = ctx.LZ4Frame.compress(streamData2, { contentChecksum: true, contentSize: true });
+const meta = ctx.LZ4Frame.createSkippableFrame(metadata, 3);
+const mixedStream = ctx.LZ4Frame.concatFrames([f1, meta, f2]);
+
+const parsedStream = ctx.LZ4Frame.parseFrameStream(mixedStream);
+assert(parsedStream.length === 3, `Parsed ${parsedStream.length} frames (expected 3)`);
+assert(parsedStream[0].type === 'standard', 'Frame 0 = standard');
+assert(parsedStream[1].type === 'skippable', 'Frame 1 = skippable');
+assert(parsedStream[2].type === 'standard', 'Frame 2 = standard');
+
+// Verify standard frames decompressed correctly
+assert(parsedStream[0].data.length === streamData1.length &&
+       streamData1.every((v, i) => v === parsedStream[0].data[i]), 'Frame 0 data matches');
+assert(parsedStream[2].data.length === streamData2.length &&
+       streamData2.every((v, i) => v === parsedStream[2].data[i]), 'Frame 2 data matches');
+
+// Verify skippable frame data
+assert(parsedStream[1].data.length === metadata.length &&
+       metadata.every((v, i) => v === parsedStream[1].data[i]), 'Skippable data matches');
+assert(parsedStream[1].frameInfo.magicVariant === 3, `Magic variant = 3`);
+
+// Multiple skippable frames
+const skip1 = ctx.LZ4Frame.createSkippableFrame('meta1', 0);
+const skip2 = ctx.LZ4Frame.createSkippableFrame('meta2', 5);
+const skip3 = ctx.LZ4Frame.createSkippableFrame('meta3', 15);
+const skipOnly = ctx.LZ4Frame.concatFrames([skip1, skip2, skip3]);
+const parsedSkips = ctx.LZ4Frame.parseFrameStream(skipOnly);
+assert(parsedSkips.length === 3, `3 skippable frames parsed`);
+assert(parsedSkips[0].frameInfo.magicVariant === 0, 'Variant 0');
+assert(parsedSkips[1].frameInfo.magicVariant === 5, 'Variant 5');
+assert(parsedSkips[2].frameInfo.magicVariant === 15, 'Variant 15');
+
+// Large user data
+const largeMeta = new Uint8Array(65536);
+for (let i = 0; i < largeMeta.length; i++) largeMeta[i] = i & 0xFF;
+const largeSkip = ctx.LZ4Frame.createSkippableFrame(largeMeta);
+assert(largeSkip.length === 8 + 65536, 'Large skippable frame size correct');
+const largeParsed = ctx.LZ4Parser.parse(largeSkip);
+assert(largeParsed.frames[0].info.frameSize === 65536, 'Large frame size field correct');
+
+// ============================================================
+console.log('\n=== 17. CLI cross-verification ===');
 const tmpDir = siteDir;
 try {
   const cliData = new TextEncoder().encode('CLI cross-verification test data. '.repeat(10));

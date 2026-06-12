@@ -408,6 +408,142 @@ var LZ4Frame = (() => {
     };
   }
 
+  /**
+   * Create a Skippable Frame containing arbitrary user data.
+   * LZ4 decoders will skip over this frame when encountered in a stream.
+   * @param {Uint8Array|string} userData - data to embed
+   * @param {number} magicVariant - 0-15, selects magic number (0x184D2A50 + variant). Default 0.
+   * @returns {Uint8Array} skippable frame bytes
+   */
+  function createSkippableFrame(userData, magicVariant = 0) {
+    if (typeof userData === 'string') userData = new TextEncoder().encode(userData);
+    if (!(userData instanceof Uint8Array)) userData = new Uint8Array(userData);
+    if (magicVariant < 0 || magicVariant > 15) throw new Error('magicVariant must be 0-15');
+
+    const out = new Uint8Array(8 + userData.length);
+    write32le(out, 0, MAGIC_SKIPPABLE + magicVariant);
+    write32le(out, 4, userData.length);
+    out.set(userData, 8);
+    return out;
+  }
+
+  /**
+   * Concatenate multiple frame buffers into a single stream.
+   * Each frame is an independent Uint8Array (standard LZ4 frame or skippable frame).
+   * @param {Uint8Array[]} frames - array of frame buffers
+   * @returns {Uint8Array} concatenated stream
+   */
+  function concatFrames(frames) {
+    let totalLen = 0;
+    for (const f of frames) totalLen += f.length;
+    const out = new Uint8Array(totalLen);
+    let off = 0;
+    for (const f of frames) {
+      out.set(f, off);
+      off += f.length;
+    }
+    return out;
+  }
+
+  /**
+   * Parse a stream of concatenated frames (standard, legacy, skippable).
+   * Returns an array of { type, data, frameInfo, rawBytes } for each frame.
+   * Standard frames are decompressed; skippable frames return userData.
+   * @param {Uint8Array} src - concatenated frame stream
+   * @returns {Array} parsed frames
+   */
+  function parseFrameStream(src) {
+    const results = [];
+    let off = 0;
+
+    while (off < src.length) {
+      if (off + 4 > src.length) break;
+      const magic = read32le(src, off);
+
+      if (magic === MAGICNUMBER) {
+        // Standard frame - find its end by looking for EndMark
+        let end = off + 7; // minimum header
+        // Scan for end mark (0x00000000) after header
+        // We need to parse the header to know its size, then scan blocks
+        const headerEnd = off + 4;
+        // Read FLG to determine header size
+        if (headerEnd + 2 > src.length) break;
+        const flg = src[headerEnd];
+        let hdrSize = 7; // magic(4) + FLG(1) + BD(1) + HCRC(1)
+        if ((flg >> 3) & 1) hdrSize += 8; // content size
+        if (flg & 1) hdrSize += 4; // dict ID
+
+        // Scan blocks to find end
+        let scanOff = off + hdrSize;
+        while (scanOff + 4 <= src.length) {
+          const blockHeader = read32le(src, scanOff);
+          scanOff += 4;
+          if (blockHeader === 0) break; // end mark
+          const blockSize = blockHeader & 0x7FFFFFFF;
+          scanOff += blockSize;
+          // Skip block checksum if present
+          if ((flg >> 4) & 1) scanOff += 4;
+        }
+        // Skip content checksum if present
+        if ((flg >> 5) & 1) scanOff += 4;
+
+        const rawBytes = src.slice(off, scanOff);
+        try {
+          const decompressed = decompress(rawBytes);
+          results.push({ type: 'standard', data: decompressed.data, frameInfo: decompressed.frameInfo, rawBytes });
+        } catch (e) {
+          results.push({ type: 'standard', data: null, frameInfo: { error: e.message }, rawBytes });
+        }
+        off = scanOff;
+
+      } else if ((magic & 0xFFFFFFF0) === MAGIC_SKIPPABLE) {
+        // Skippable frame
+        if (off + 8 > src.length) break;
+        const frameSize = read32le(src, off + 4);
+        const totalSize = 8 + frameSize;
+        if (off + totalSize > src.length) break;
+
+        const userData = src.slice(off + 8, off + totalSize);
+        results.push({
+          type: 'skippable',
+          data: userData,
+          frameInfo: { magic, frameSize, magicVariant: magic - MAGIC_SKIPPABLE },
+          rawBytes: src.slice(off, off + totalSize)
+        });
+        off += totalSize;
+
+      } else if (magic === LEGACY_MAGIC) {
+        // Legacy frame - scan blocks until EOF or next magic
+        let scanOff = off + 4;
+        while (scanOff + 4 <= src.length) {
+          const blockSize = read32le(src, scanOff);
+          // Check if this is actually a new frame magic
+          if (blockSize === 0 || blockSize > 8 * 1024 * 1024 ||
+              read32le(src, scanOff) === MAGICNUMBER ||
+              (read32le(src, scanOff) & 0xFFFFFFF0) === MAGIC_SKIPPABLE) {
+            break;
+          }
+          scanOff += 4 + blockSize;
+        }
+        const rawBytes = src.slice(off, scanOff);
+        try {
+          const decompressed = decompress(rawBytes);
+          results.push({ type: 'legacy', data: decompressed.data, frameInfo: decompressed.frameInfo, rawBytes });
+        } catch (e) {
+          results.push({ type: 'legacy', data: null, frameInfo: { error: e.message }, rawBytes });
+        }
+        off = scanOff;
+
+      } else {
+        // Unknown data, skip to end
+        results.push({ type: 'unknown', data: null, frameInfo: { magic }, rawBytes: src.slice(off) });
+        break;
+      }
+    }
+
+    return results;
+  }
+
   function decompressSkippable(src) {
     const frameSize = read32le(src, 4);
     const userData = src.slice(8, 8 + frameSize);
@@ -426,6 +562,9 @@ var LZ4Frame = (() => {
     compress,
     compressLegacy,
     decompress,
+    createSkippableFrame,
+    concatFrames,
+    parseFrameStream,
     BlockSizeID,
     BlockMaxSize,
     BlockMode,
