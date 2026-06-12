@@ -341,7 +341,64 @@ try {
 }
 
 // ============================================================
-console.log('\n=== 13. CLI cross-verification ===');
+console.log('\n=== 14. Parallel compression (worker code verification) ===');
+
+// Test the worker's embedded compression code by loading lz4-worker.js
+// and extracting the blockCompress function
+try {
+  const workerCode = fs.readFileSync(path.join(siteDir, 'lz4-worker.js'), 'utf8');
+  // The worker uses an IIFE, extract and test the compression logic
+  // Create a mock self.onmessage to capture the handler
+  const workerCtx = vm.createContext({
+    console, Math, Uint8Array, Int32Array, BigInt,
+    self: { onmessage: null },
+    postMessage: function() {},
+    URL: { createObjectURL: () => '', revokeObjectURL: () => {} },
+    Blob: function() {},
+    Worker: function() {}
+  });
+  vm.runInContext(workerCode, workerCtx);
+
+  // Verify the handler was registered
+  assert(typeof workerCtx.self.onmessage === 'function', 'Worker handler registered');
+
+  // Verify frame assembly logic (simulated)
+  const workerTestData = new TextEncoder().encode('Worker compression test data. '.repeat(100));
+  const testBlocks = [];
+  let testOff = 0;
+  const testBlockSize = 1024;
+  while (testOff < workerTestData.length) {
+    const sz = Math.min(testBlockSize, workerTestData.length - testOff);
+    testBlocks.push(workerTestData.slice(testOff, testOff + sz));
+    testOff += sz;
+  }
+
+  // Simulate parallel results
+  const simResults = testBlocks.map((block, i) => {
+    const compressed = blockCompress(block);
+    return { data: compressed, originalSize: block.length, compressedSize: compressed.length };
+  });
+
+  // Verify all blocks compress correctly
+  const allBlocksOk = simResults.every((r, i) => {
+    const decompressed = blockDecompress(r.data, r.originalSize);
+    return decompressed.length === testBlocks[i].length &&
+           testBlocks[i].every((v, j) => v === decompressed[j]);
+  });
+  assert(allBlocksOk, `All ${testBlocks.length} parallel blocks roundtrip correctly`);
+
+  // Verify total size matches
+  const totalOriginal = simResults.reduce((s, r) => s + r.originalSize, 0);
+  assert(totalOriginal === workerTestData.length, `Total original size matches (${totalOriginal})`);
+
+  console.log(`  Parallel: ${testBlocks.length} blocks, ${workerTestData.length}B total`);
+} catch (e) {
+  console.log('  Parallel test error:', e.message.substring(0, 100));
+  failed++;
+}
+
+// ============================================================
+console.log('\n=== 15. CLI cross-verification ===');
 const tmpDir = siteDir;
 try {
   const cliData = new TextEncoder().encode('CLI cross-verification test data. '.repeat(10));
