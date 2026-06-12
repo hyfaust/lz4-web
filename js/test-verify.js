@@ -285,7 +285,63 @@ try {
 }
 
 // ============================================================
-console.log('\n=== 10. CLI cross-verification ===');
+console.log('\n=== 11. --favor-decSpeed ===');
+const fdsData = new TextEncoder().encode('favor-decSpeed test data. '.repeat(300));
+for (const lvl of [10, 11, 12]) {
+  const fNo = frameCompress(fdsData, { compressionLevel: lvl, contentChecksum: true, contentSize: true });
+  const fYes = frameCompress(fdsData, { compressionLevel: lvl, contentChecksum: true, contentSize: true, favorDecSpeed: true });
+  const rYes = frameDecompress(fYes);
+  const match = rYes.data.length === fdsData.length && fdsData.every((v, i) => v === rYes.data[i]);
+  assert(match, `favor-decSpeed level=${lvl} [normal:${fNo.length}B, fast:${fYes.length}B]`);
+  // favor-decSpeed should produce equal or smaller output (shorter matches = less overhead)
+}
+
+// ============================================================
+console.log('\n=== 12. Legacy format ===');
+const legacyData = new TextEncoder().encode('Legacy format test. '.repeat(100));
+const legacyCompressed = ctx.LZ4Frame.compressLegacy(legacyData);
+const legacyParsed = ctx.LZ4Parser.parse(legacyCompressed);
+assert(legacyParsed.frames[0]?.type === 'legacy', 'Legacy frame detected by parser');
+assert(legacyParsed.frames[0].info?.format === 'Legacy (Linux kernel compatible)', 'Legacy format recognized');
+// Legacy decompression
+const legacyDec = ctx.LZ4Frame.decompress(legacyCompressed);
+assert(legacyDec.data.length === legacyData.length && legacyData.every((v, i) => v === legacyDec.data[i]),
+  `Legacy roundtrip [${legacyData.length}B→${legacyCompressed.length}B]`);
+
+// CLI legacy cross-verify
+try {
+  const fIn = path.join(siteDir, '_leg_in.tmp');
+  const fLz4 = path.join(siteDir, '_leg_out.tmp.lz4');
+  const fDec = path.join(siteDir, '_leg_dec.tmp');
+  fs.writeFileSync(fIn, legacyData);
+
+  // JS Legacy compress → CLI decompress
+  fs.writeFileSync(fLz4, legacyCompressed);
+  try {
+    execSync(`lz4 -d -f "${fLz4}" "${fDec}"`);
+    const dec = new Uint8Array(fs.readFileSync(fDec));
+    assert(dec.length === legacyData.length && legacyData.every((v, i) => v === dec[i]), 'JS Legacy → CLI decompress');
+  } catch (e) {
+    assert(false, 'JS Legacy → CLI: ' + (e.stderr || e.message || '').toString().substring(0, 80));
+  }
+
+  // CLI -l compress → JS decompress
+  execSync(`lz4 -l -f "${fIn}" "${fLz4}"`);
+  const cliLegacy = new Uint8Array(fs.readFileSync(fLz4));
+  const cliLegacyDec = ctx.LZ4Frame.decompress(cliLegacy);
+  assert(cliLegacyDec.data.length === legacyData.length && legacyData.every((v, i) => v === cliLegacyDec.data[i]),
+    'CLI Legacy → JS decompress');
+
+  try { fs.unlinkSync(fIn); } catch {}
+  try { fs.unlinkSync(fLz4); } catch {}
+  try { fs.unlinkSync(fDec); } catch {}
+} catch (e) {
+  console.log('  Legacy CLI test error:', e.message.substring(0, 100));
+  failed++;
+}
+
+// ============================================================
+console.log('\n=== 13. CLI cross-verification ===');
 const tmpDir = siteDir;
 try {
   const cliData = new TextEncoder().encode('CLI cross-verification test data. '.repeat(10));

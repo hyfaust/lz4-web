@@ -141,7 +141,7 @@ var LZ4Frame = (() => {
       // Use HC compressor for levels >= 2, Fast compressor for level 1
       let compressed;
       if (compressionLevel >= 2 && typeof LZ4HC !== 'undefined') {
-        compressed = LZ4HC.compress(blockData, { level: compressionLevel, dict: dictData });
+        compressed = LZ4HC.compress(blockData, { level: compressionLevel, dict: dictData, favorDecSpeed: options.favorDecSpeed || false });
       } else {
         compressed = LZ4Block.compress(blockData, { acceleration, dict: dictData });
       }
@@ -338,6 +338,41 @@ var LZ4Frame = (() => {
     return { data: output, frameInfo };
   }
 
+  /**
+   * Compress data in Legacy format (compatible with Linux kernel).
+   * Fixed 8MB block size, always compressed, no checksums.
+   */
+  function compressLegacy(src, options = {}) {
+    const LEGACY_BLOCK_SIZE = 8 * 1024 * 1024;
+    const acceleration = options.acceleration || 1;
+    const chunks = [];
+    let off = 0;
+
+    while (off < src.length) {
+      const chunkSize = Math.min(LEGACY_BLOCK_SIZE, src.length - off);
+      const blockData = src.slice(off, off + chunkSize);
+      const compressed = LZ4Block.compress(blockData, { acceleration });
+      // Legacy always stores compressed (even if larger)
+      chunks.push(compressed);
+      off += chunkSize;
+    }
+
+    // Assemble: magic + blocks
+    let totalSize = 4; // magic
+    for (const c of chunks) totalSize += 4 + c.length; // size + data per block
+
+    const out = new Uint8Array(totalSize);
+    let woff = 0;
+    write32le(out, woff, LEGACY_MAGIC); woff += 4;
+
+    for (const c of chunks) {
+      write32le(out, woff, c.length); woff += 4;
+      out.set(c, woff); woff += c.length;
+    }
+
+    return out.slice(0, woff);
+  }
+
   function decompressLegacy(src) {
     let off = 4; // skip magic
     const outputChunks = [];
@@ -389,6 +424,7 @@ var LZ4Frame = (() => {
 
   return {
     compress,
+    compressLegacy,
     decompress,
     BlockSizeID,
     BlockMaxSize,

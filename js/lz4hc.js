@@ -64,7 +64,13 @@ var LZ4HC = (() => {
   function compress(src, options = {}) {
     if (src.length === 0) return new Uint8Array(0);
     const level = Math.max(2, Math.min(12, options.level || 9));
-    const params = LEVEL_PARAMS[level];
+    const params = { ...LEVEL_PARAMS[level] };
+    const favorDecSpeed = options.favorDecSpeed || false;
+    // When favorDecSpeed, cap targetLen for levels 10-12 to produce shorter,
+    // more aligned matches that decompress faster
+    if (favorDecSpeed && level >= 10) {
+      params.targetLen = 16;
+    }
     const dict = options.dict || null;
 
     const maxDst = src.length + Math.floor(src.length / 255) + 16;
