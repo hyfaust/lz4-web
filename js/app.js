@@ -41,6 +41,7 @@ var App = (() => {
   // ========== Compress Tab ==========
   let selectedFiles = [];
   let dictData = null;
+  let skippableData = null;
 
   function setupCompressTab() {
     // Mode toggle
@@ -110,6 +111,7 @@ var App = (() => {
       document.getElementById('btn-test').style.display = isDecompress ? '' : 'none';
       document.getElementById('level-group').style.display = isDecompress ? 'none' : '';
       document.getElementById('dict-group').style.display = isDecompress ? 'none' : '';
+      document.getElementById('skippable-group').style.display = isDecompress ? 'none' : '';
     });
 
     // Dictionary file
@@ -130,6 +132,67 @@ var App = (() => {
     // Text compress
     document.getElementById('btn-text-compress').addEventListener('click', textCompress);
     document.getElementById('btn-text-decompress').addEventListener('click', textDecompress);
+
+    // Skippable frame
+    setupSkippableFrame();
+    
+    // Initialize skippable group visibility
+    document.getElementById('skippable-group').style.display = '';
+  }
+
+  function setupSkippableFrame() {
+    const modeSelect = document.getElementById('opt-skippable-mode');
+    const variantSelect = document.getElementById('opt-skippable-variant');
+    const inputArea = document.getElementById('skippable-input-area');
+    const fileInput = document.getElementById('skippable-file-input');
+    const btnSelectFile = document.getElementById('btn-skippable-select');
+    const fileNameSpan = document.getElementById('skippable-file-name');
+
+    // Mode change
+    modeSelect.addEventListener('change', () => {
+      const mode = modeSelect.value;
+      if (mode === 'metadata') {
+        inputArea.innerHTML = '<textarea id="skippable-json-input" rows="3" placeholder=\'{"version":1,"author":"test","note":"自定义元数据"}\' data-i18n-placeholder="compress.skippable.placeholder"></textarea>';
+      } else if (mode === 'file') {
+        inputArea.innerHTML = `
+          <input type="file" id="skippable-file-input" style="display:none" accept="*/*">
+          <div style="margin-top:0.5rem;display:flex;gap:0.5rem;">
+            <button class="btn btn-sm" id="btn-skippable-select" data-i18n="compress.skippable.selectFile">选择文件</button>
+            <span id="skippable-file-name" class="dict-name" style="flex:1;">未选择</span>
+          </div>`;
+        // Re-bind file select button
+        const newBtn = document.getElementById('btn-skippable-select');
+        newBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', () => {
+          if (fileInput.files.length) {
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = () => {
+              skippableData = new Uint8Array(reader.result);
+              fileNameSpan.textContent = file.name + ` (${formatBytes(skippableData.length)})`;
+            };
+            reader.readAsArrayBuffer(file);
+          }
+        });
+      } else {
+        inputArea.innerHTML = '';
+        skippableData = null;
+      }
+    });
+
+    // File select button
+    btnSelectFile.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) {
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        reader.onload = () => {
+          skippableData = new Uint8Array(reader.result);
+          fileNameSpan.textContent = file.name + ` (${formatBytes(skippableData.length)})`;
+        };
+        reader.readAsArrayBuffer(file);
+      }
+    });
   }
 
   function updateFileList() {
@@ -174,6 +237,10 @@ var App = (() => {
     const resultDiv = document.getElementById('compress-result');
     const results = [];
     const STREAM_THRESHOLD = 4 * 1024 * 1024; // Use streaming for files > 4MB
+    
+    // Get skippable frame before processing
+    const options = getCompressOptions();
+    const skippableFrame = window._lastSkippableFrame;
 
     resultDiv.innerHTML = `<div class="loading">${I18n.t('result.processing')}</div>`;
 
@@ -182,13 +249,30 @@ var App = (() => {
       try {
         let result;
         if (action === 'compress') {
-          if (file.size > STREAM_THRESHOLD && typeof LZ4Stream !== 'undefined') {
+          if (skippableFrame && file.size <= STREAM_THRESHOLD) {
+            // With skippable frame, need to manually concatenate
+            const fileResult = await LZ4Compress.handleFileCompress(file, options);
+            // Concatenate: skippable frame + compressed data
+            const totalLen = skippableFrame.length + fileResult.compressedSize;
+            const combined = new Uint8Array(totalLen);
+            combined.set(skippableFrame, 0);
+            combined.set(fileResult.data, skippableFrame.length);
+            result = {
+              data: combined,
+              originalSize: fileResult.originalSize,
+              compressedSize: totalLen,
+              ratio: (fileResult.originalSize / totalLen).toFixed(2),
+              elapsed: fileResult.elapsed,
+              speed: fileResult.speed,
+              hasSkippable: true,
+              skippableSize: skippableFrame.length
+            };
+          } else if (file.size > STREAM_THRESHOLD && typeof LZ4Stream !== 'undefined') {
             // Streaming mode for large files
-            const opts = getCompressOptions();
-            const streamResult = await LZ4Stream.compressFile(file, opts);
+            const streamResult = await LZ4Stream.compressFile(file, options);
             result = { data: streamResult.data, ...streamResult.stats, inputName: file.name };
           } else {
-            result = await LZ4Compress.handleFileCompress(file, getCompressOptions());
+            result = await LZ4Compress.handleFileCompress(file, options);
           }
           result.filename = file.name + '.lz4';
         } else {
@@ -223,7 +307,16 @@ var App = (() => {
       } else {
         const origSize = action === 'compress' ? r.originalSize : r.compressedSize;
         const outSize = action === 'compress' ? r.compressedSize : r.decompressedSize;
-        html += `<tr><td>${r.inputName}</td><td>${formatBytes(origSize)}</td><td>${formatBytes(outSize)}</td><td>${r.ratio}:1</td><td>${r.elapsed} ms</td></tr>`;
+        let rowHtml = `<tr><td>${r.inputName}</td><td>${formatBytes(origSize)}</td><td>${formatBytes(outSize)}</td><td>${r.ratio}:1</td><td>${r.elapsed} ms</td></tr>`;
+        
+        // Show skippable frame info
+        if (r.hasSkippable) {
+          rowHtml += `<tr style="background:rgba(0,128,0,0.05)">
+            <td colspan="5" style="font-size:0.8rem;padding-left:1rem;color:var(--primary)">
+              ⏭️ 跳过帧: 嵌入 ${formatBytes(r.skippableSize)} 元数据
+            </td></tr>`;
+        }
+        html += rowHtml;
       }
     }
     html += '</tbody></table>';
@@ -370,6 +463,36 @@ var App = (() => {
   function getCompressOptions() {
     const blockSize = parseInt(document.getElementById('opt-block-size').value);
     const level = parseInt(document.getElementById('opt-level').value);
+    
+    // Get skippable frame info
+    const skippableMode = document.getElementById('opt-skippable-mode').value;
+    const skippableVariant = parseInt(document.getElementById('opt-skippable-variant').value);
+    let skippableFrame = null;
+    
+    // Reset skippableData based on mode
+    if (skippableMode === 'none') {
+      skippableData = null;
+    } else if (skippableMode === 'metadata') {
+      const jsonStr = document.getElementById('skippable-json-input').value;
+      if (jsonStr) {
+        try {
+          skippableData = new TextEncoder().encode(jsonStr);
+        } catch (e) {
+          skippableData = null;
+        }
+      } else {
+        skippableData = null;
+      }
+    }
+    // For 'file' mode, skippableData is set by the file input handler
+    
+    if (skippableMode !== 'none' && skippableData) {
+      skippableFrame = LZ4Frame.createSkippableFrame(skippableData, skippableVariant);
+    }
+    
+    // Store for later use
+    window._lastSkippableFrame = skippableFrame;
+    
     return {
       compressionLevel: level,
       blockSizeID: blockSize,
@@ -377,7 +500,8 @@ var App = (() => {
       contentChecksum: document.getElementById('opt-content-crc').checked && !document.getElementById('opt-no-frame-crc').checked,
       blockChecksum: document.getElementById('opt-block-crc').checked,
       contentSize: document.getElementById('opt-content-size').checked,
-      dictData: dictData
+      dictData: dictData,
+      skippableFrame: skippableFrame
     };
   }
 

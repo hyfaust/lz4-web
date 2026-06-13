@@ -122,6 +122,50 @@
         </div>
       </div>
 
+      <!-- Skippable Frame Section -->
+      <div class="form-group" id="skippable-group" style="display:none">
+        <label data-i18n="compress.skippableMode">跳过帧模式</label>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <select id="opt-skippable-mode" style="flex:1;">
+            <option value="none" data-i18n="compress.skippable.none">禁用</option>
+            <option value="metadata" data-i18n="compress.skippable.metadata">嵌入元数据 (JSON)</option>
+            <option value="file" data-i18n="compress.skippable.file">嵌入文件</option>
+          </select>
+          <span id="skippable-variant-label" style="font-size:0.85rem;color:var(--text-dim);">变体:</span>
+          <select id="opt-skippable-variant" style="width:80px;">
+            <option value="0">0</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <option value="11">11</option>
+            <option value="12">12</option>
+            <option value="13">13</option>
+            <option value="14">14</option>
+            <option value="15">15</option>
+          </select>
+        </div>
+        <div id="skippable-input-area" style="margin-top:0.5rem;">
+          <!-- JSON input for metadata mode -->
+          <textarea id="skippable-json-input" rows="3" placeholder='{"version":1,"author":"test","note":"自定义元数据"}' data-i18n-placeholder="compress.skippable.placeholder" style="width:100%;box-sizing:border-box;"></textarea>
+          <!-- File input for file mode -->
+          <input type="file" id="skippable-file-input" style="display:none" accept="*/*">
+          <div style="margin-top:0.5rem;display:flex;gap:0.5rem;">
+            <button class="btn btn-sm" id="btn-skippable-select" data-i18n="compress.skippable.selectFile">选择文件</button>
+            <span id="skippable-file-name" class="dict-name" style="flex:1;">未选择</span>
+          </div>
+        </div>
+        <p style="font-size:0.75rem;color:var(--text-dim);margin-top:0.3rem;" data-i18n="compress.skippable.hint">
+          跳过帧会在 LZ4 流中嵌入自定义数据，解码器会自动跳过
+        </p>
+      </div>
+
       <!-- File Mode -->
       <div id="file-section">
         <div class="drop-zone" id="drop-zone">

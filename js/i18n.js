@@ -51,6 +51,13 @@ var I18n = (() => {
     'compress.btnDecompress': { en: '← Decompress', zh: '← 解压' },
     'compress.outputHex': { en: 'Compressed Output (hex)', zh: '压缩输出 (十六进制)' },
     'compress.outputPlaceholder': { en: 'Compressed data will appear here...', zh: '压缩数据将显示在此...' },
+    'compress.skippableMode': { en: 'Skippable Frame', zh: '跳过帧模式' },
+    'compress.skippable.none': { en: 'Disabled', zh: '禁用' },
+    'compress.skippable.metadata': { en: 'Embed Metadata (JSON)', zh: '嵌入元数据 (JSON)' },
+    'compress.skippable.file': { en: 'Embed File', zh: '嵌入文件' },
+    'compress.skippable.placeholder': { en: '{"version":1,"author":"test","note":"Custom metadata"}', zh: '{"version":1,"author":"test","note":"自定义元数据"}' },
+    'compress.skippable.selectFile': { en: 'Select File', zh: '选择文件' },
+    'compress.skippable.hint': { en: 'Skippable frames embed custom data into the LZ4 stream; decoders automatically skip them', zh: '跳过帧会在 LZ4 流中嵌入自定义数据，解码器会自动跳过' },
 
     // ========== Compress Results ==========
     'result.processing': { en: 'Processing...', zh: '处理中...' },
