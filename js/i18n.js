@@ -58,6 +58,7 @@ var I18n = (() => {
     'compress.skippable.placeholder': { en: '{"version":1,"author":"test","note":"Custom metadata"}', zh: '{"version":1,"author":"test","note":"自定义元数据"}' },
     'compress.skippable.selectFile': { en: 'Select File', zh: '选择文件' },
     'compress.skippable.hint': { en: 'Skippable frames embed custom data into the LZ4 stream; decoders automatically skip them', zh: '跳过帧会在 LZ4 流中嵌入自定义数据，解码器会自动跳过' },
+    'compress.skippable.variant': { en: 'Variant:', zh: '变体:' },
 
     // ========== Compress Results ==========
     'result.processing': { en: 'Processing...', zh: '处理中...' },
